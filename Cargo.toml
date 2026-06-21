@@ -1,0 +1,9 @@
+[package]
+name = "iced_menu_bar"
+version = "0.1.0"
+edition = "2024"
+description = "A custom menu-bar widget for iced with element-based items, submenus, icons and tooltips."
+
+[dependencies]
+iced = { version = "0.14", features = ["advanced"] }
+thiserror = "2"
