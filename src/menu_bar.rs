@@ -118,7 +118,6 @@ where
     padding: Padding,
     width: Length,
     height: Length,
-    align_items: Alignment,
     pub(crate) global_parameters: GlobalParameters<'a, Theme>,
 }
 impl<'a, Message, Theme, Renderer> MenuBar<'a, Message, Theme, Renderer>
@@ -145,20 +144,15 @@ where
             },
             width: Length::Shrink,
             height: Length::Shrink,
-            align_items: Alignment::Center,
             global_parameters: GlobalParameters {
                 safe_bounds_margin: 40.0,
                 // `Fill` draws a backdrop behind the active path regardless of widget state. The
                 // built-in `root`/`submenu` buttons carry no `on_press` (iced renders them as
                 // `Disabled`, which never reports `Hovered`), so `Hover` would not highlight them.
                 path_highlight: PathHighlight::Fill,
-                scroll_speed: ScrollSpeed {
-                    per_line: 60.0,
-                    per_pixel: 1.0,
-                },
                 close_on_item_click: true,
                 close_on_background_click: false,
-                open_on_hover: false,
+                open_on_hover: true,
                 class: Theme::default(),
             },
         }
@@ -198,12 +192,6 @@ where
         self
     }
 
-    /// Sets the scroll speed of the [`Menu`]s in the [`MenuBar`]
-    pub fn scroll_speed(mut self, scroll_speed: ScrollSpeed) -> Self {
-        self.global_parameters.scroll_speed = scroll_speed;
-        self
-    }
-
     /// Sets when an open menu tree is dismissed (the default is [`Dismiss::OnItemClick`]).
     ///
     /// This is the bar-wide policy; individual entries can override it with
@@ -230,12 +218,6 @@ where
     /// regardless of this setting; this only governs the *first* open.
     pub fn open_on_hover(mut self, open_on_hover: bool) -> Self {
         self.global_parameters.open_on_hover = open_on_hover;
-        self
-    }
-
-    /// Sets the vertical alignment of the bar's root items (defaults to [`Alignment::Center`]).
-    pub fn align_items(mut self, align: impl Into<Alignment>) -> Self {
-        self.align_items = align.into();
         self
     }
 
@@ -314,7 +296,7 @@ where
             self.height,
             self.padding,
             self.spacing,
-            self.align_items,
+            Alignment::Center,
             &mut self
                 .roots
                 .iter_mut()
@@ -508,10 +490,9 @@ where
                 if cursor.is_over(bar_bounds)
                     && slice_layout.bounds().width > layout.bounds().width =>
             {
-                let scroll_speed = self.global_parameters.scroll_speed;
                 let delta_x = match delta {
-                    mouse::ScrollDelta::Lines { x, .. } => x * scroll_speed.per_line,
-                    mouse::ScrollDelta::Pixels { x, .. } => x * scroll_speed.per_pixel,
+                    mouse::ScrollDelta::Lines { x, .. } => x * SCROLL_SPEED_LINE,
+                    mouse::ScrollDelta::Pixels { x, .. } => x * SCROLL_SPEED_PIXEL,
                 };
 
                 let min_offset = -(slice_layout.bounds().width - layout.bounds().width);

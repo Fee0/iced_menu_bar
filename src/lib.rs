@@ -34,7 +34,7 @@ mod menu_bar;
 mod overlay;
 mod style;
 
-pub use common::{Dismiss, PathHighlight, ScrollSpeed};
+pub use common::{Dismiss, PathHighlight};
 pub use menu::{ActionBuilder, Item, Menu, RootBuilder, SubmenuBuilder, separator};
 pub use menu_bar::MenuBar;
 pub use style::{

@@ -80,14 +80,8 @@ pub(crate) enum RecEvent {
     None,
 }
 
-#[derive(Debug, Clone, Copy)]
-/// Scroll speed
-pub struct ScrollSpeed {
-    /// Pixels scrolled per reported line of line-based wheel movement.
-    pub per_line: f32,
-    /// Pixels scrolled per reported pixel of pixel-precise (trackpad) movement.
-    pub per_pixel: f32,
-}
+pub(crate) const SCROLL_SPEED_LINE: f32 = 60.0;
+pub(crate) const SCROLL_SPEED_PIXEL: f32 = 1.0;
 
 pub(crate) fn pad_rectangle(rect: Rectangle, padding: Padding) -> Rectangle {
     Rectangle {
@@ -194,7 +188,6 @@ pub enum Dismiss {
 pub(crate) struct GlobalParameters<'a, Theme: Catalog> {
     pub(crate) safe_bounds_margin: f32,
     pub(crate) path_highlight: PathHighlight,
-    pub(crate) scroll_speed: ScrollSpeed,
     pub(crate) close_on_item_click: bool,
     pub(crate) close_on_background_click: bool,
     pub(crate) open_on_hover: bool,
@@ -212,6 +205,7 @@ pub(crate) fn try_open_menu<'a, 'b, Message, Theme: Catalog, Renderer: renderer:
 ) {
     let old_active = menu_state.active;
     let slice = menu_state.slice;
+    let mut hovered: Index = None;
 
     for (i, ((item, tree), layout)) in
         itl_iter_slice_enum!(slice, items;iter_mut, item_trees;iter_mut, item_layouts)
@@ -220,15 +214,27 @@ pub(crate) fn try_open_menu<'a, 'b, Message, Theme: Catalog, Renderer: renderer:
             if item.menu.is_some() {
                 menu_state.open_new_menu(i, item, tree);
             }
+            if item.navigable {
+                hovered = Some(i);
+            }
             break;
         }
     }
 
-    if menu_state.active != old_active {
-        // Keep keyboard focus in step with the mouse-opened path so the two highlights don't
-        // diverge when the user switches between mouse and keyboard.
-        menu_state.keyboard_highlight = menu_state.active;
+    let active_changed = menu_state.active != old_active;
+
+    // Always track keyboard_highlight to the mouse position so a stale highlight from a
+    // previously-open submenu doesn't linger after the user moves to a different item.
+    let new_highlight = menu_state.active.or(hovered);
+    let highlight_changed = menu_state.keyboard_highlight != new_highlight;
+    if highlight_changed {
+        menu_state.keyboard_highlight = new_highlight;
+    }
+
+    if active_changed {
         shell.invalidate_layout();
+    }
+    if active_changed || highlight_changed {
         shell.request_redraw();
     }
 }

@@ -133,7 +133,6 @@ where
     pub(crate) axis: Axis,
     pub(crate) offset: f32,
     pub(crate) padding: Padding,
-    pub(crate) align_items: Alignment,
 }
 impl<'a, Message, Theme, Renderer> Menu<'a, Message, Theme, Renderer>
 where
@@ -151,7 +150,6 @@ where
             axis: Axis::Horizontal,
             offset: 0.0,
             padding: Padding::new(4.0),
-            align_items: Alignment::Start,
         }
     }
 
@@ -170,13 +168,6 @@ where
     /// Sets the height of the [`Menu`].
     pub fn height(mut self, height: impl Into<Length>) -> Self {
         self.height = height.into();
-        self
-    }
-
-    /// Sets the cross-axis alignment of the [`Menu`]'s rows (defaults to
-    /// [`Alignment::Start`]).
-    pub fn align_items(mut self, align: impl Into<Alignment>) -> Self {
-        self.align_items = align.into();
         self
     }
 
@@ -254,7 +245,7 @@ where
             self.height,
             Padding::ZERO,
             self.spacing,
-            self.align_items,
+            Alignment::Start,
             &mut self
                 .items
                 .iter_mut()
@@ -542,12 +533,8 @@ where
                     if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
                         if cursor.is_over(background_bounds) {
                             let delta_y = match delta {
-                                mouse::ScrollDelta::Lines { y, .. } => {
-                                    y * global_parameters.scroll_speed.per_line
-                                }
-                                mouse::ScrollDelta::Pixels { y, .. } => {
-                                    y * global_parameters.scroll_speed.per_pixel
-                                }
+                                mouse::ScrollDelta::Lines { y, .. } => y * SCROLL_SPEED_LINE,
+                                mouse::ScrollDelta::Pixels { y, .. } => y * SCROLL_SPEED_PIXEL,
                             };
 
                             let max_offset = (0.0 - items_bounds.y).max(0.0);
