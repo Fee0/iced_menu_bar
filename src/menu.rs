@@ -78,6 +78,12 @@ impl MenuState {
             return;
         };
 
+        // An empty menu has nothing to show and its slice/index logic would panic, so leave the
+        // path closed: the entry simply opens to nothing.
+        if menu.items.is_empty() {
+            return;
+        }
+
         self.active = Some(active_index);
 
         // build the state tree for the new menu
@@ -122,8 +128,6 @@ where
     pub(crate) axis: Axis,
     pub(crate) offset: f32,
     pub(crate) padding: Padding,
-    pub(crate) close_on_item_click: Option<bool>,
-    pub(crate) close_on_background_click: Option<bool>,
 }
 impl<'a, Message, Theme, Renderer> Menu<'a, Message, Theme, Renderer>
 where
@@ -141,17 +145,7 @@ where
             axis: Axis::Horizontal,
             offset: 0.0,
             padding: Padding::new(4.0),
-            close_on_item_click: None,
-            close_on_background_click: None,
         }
-    }
-
-    /// Creates a [`Menu`] with the given items, returning an error if `items` is empty.
-    pub fn try_new(items: Vec<Item<'a, Message, Theme, Renderer>>) -> crate::Result<Self> {
-        if items.is_empty() {
-            return Err(crate::Error::EmptyMenu);
-        }
-        Ok(Self::new(items))
     }
 
     /// Sets the maximum width of the [`Menu`].
@@ -181,18 +175,6 @@ where
     /// Sets the padding of the [`Menu`].
     pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
         self.padding = padding.into();
-        self
-    }
-
-    /// Sets the close on item click option of the [`Menu`].
-    pub fn close_on_item_click(mut self, value: bool) -> Self {
-        self.close_on_item_click = Some(value);
-        self
-    }
-
-    /// Sets the close on background click option of the [`Menu`].
-    pub fn close_on_background_click(mut self, value: bool) -> Self {
-        self.close_on_background_click = Some(value);
         self
     }
 
@@ -477,8 +459,8 @@ where
                 }
                 Op::RedrawUpdate => {
                     let cursor = if let Some(active) = menu_state.active {
-                        match &global_parameters.draw_path {
-                            DrawPath::FakeHovering => {
+                        match &global_parameters.path_highlight {
+                            PathHighlight::Hover => {
                                 let active_in_slice = active - menu_state.slice.start_index;
                                 let center = slice_layout
                                     .children()
@@ -491,7 +473,7 @@ where
                                     .center();
                                 mouse::Cursor::Available(center)
                             }
-                            DrawPath::Backdrop => mouse::Cursor::Unavailable,
+                            PathHighlight::Fill => mouse::Cursor::Unavailable,
                         }
                     } else {
                         cursor
@@ -535,8 +517,6 @@ where
                             &mut self.items,
                             slice_layout.children(),
                             cursor,
-                            self.close_on_item_click,
-                            self.close_on_background_click,
                         );
                     }
                 }
@@ -545,10 +525,10 @@ where
                         if cursor.is_over(background_bounds) {
                             let delta_y = match delta {
                                 mouse::ScrollDelta::Lines { y, .. } => {
-                                    y * global_parameters.scroll_speed.line
+                                    y * global_parameters.scroll_speed.per_line
                                 }
                                 mouse::ScrollDelta::Pixels { y, .. } => {
-                                    y * global_parameters.scroll_speed.pixel
+                                    y * global_parameters.scroll_speed.per_pixel
                                 }
                             };
 
@@ -723,7 +703,7 @@ where
     /// layout: Node{inf, \[ items_node, slice_node, items_bounds, offset_bounds]}
     pub(crate) fn draw(
         &self,
-        draw_path: &DrawPath,
+        path_highlight: &PathHighlight,
         tree: &Tree,
         renderer: &mut Renderer,
         theme: &Theme,
@@ -754,7 +734,7 @@ where
             );
         }
 
-        if let (DrawPath::Backdrop, Some(active)) = (draw_path, menu_state.active) {
+        if let (PathHighlight::Fill, Some(active)) = (path_highlight, menu_state.active) {
             let active_in_slice = active - menu_state.slice.start_index;
             let active_bounds = slice_layout
                 .children()
@@ -821,9 +801,17 @@ where
         }
     }
 
-    /// Sets the close on click option of the [`Item`].
-    pub fn close_on_click(mut self, close_on_click: bool) -> Self {
-        self.close_on_click = Some(close_on_click);
+    /// Keeps the menu open when this entry is clicked, overriding the bar-wide
+    /// [`Dismiss`](crate::Dismiss) policy.
+    pub fn keep_open(mut self) -> Self {
+        self.close_on_click = Some(false);
+        self
+    }
+
+    /// Closes the menu tree when this entry is clicked, overriding the bar-wide
+    /// [`Dismiss`](crate::Dismiss) policy (useful under [`Dismiss::Manual`](crate::Dismiss::Manual)).
+    pub fn close_on_click(mut self) -> Self {
+        self.close_on_click = Some(true);
         self
     }
 
@@ -974,80 +962,27 @@ where
 /// App-friendly constructors for the built-in [`iced::Theme`].
 ///
 /// These build a styled menu [`button`] for you — the same baseline look as [`menu_item_style`]
-/// and [`separator`] — so a consuming app does not need to assemble buttons by hand. Use the
-/// `*_styled` variants to swap in a custom [`button`] style while keeping the rest of the layout.
+/// and [`separator`] — so a consuming app does not need to assemble buttons by hand.
+///
+/// [`leaf`](Self::leaf) is the shorthand for a plain action row; for anything fancier the
+/// builders ([`action`](Self::action), [`submenu`](Self::submenu), [`root`](Self::root)) chain
+/// `.icon(..)` / `.hotkey(..)` / `.style(..)` and finish with `.build()`.
 impl<'a, Message> Item<'a, Message, iced::Theme, iced::Renderer>
 where
     Message: Clone + 'a,
 {
     /// Creates a leaf [`Item`]: a full-width menu row that publishes `on_press` when clicked,
     /// styled with the crate's default [`menu_item_style`].
-    pub fn leaf(label: impl iced::widget::text::IntoFragment<'a>, on_press: Message) -> Self {
-        Self::leaf_styled(label, on_press, menu_item_style)
-    }
-
-    /// Like [`leaf`](Self::leaf), but with a custom [`button`] style.
-    pub fn leaf_styled(
-        label: impl iced::widget::text::IntoFragment<'a>,
-        on_press: Message,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
-    ) -> Self {
-        Self::leaf_core(label, None, None, on_press, style)
-    }
-
-    /// Like [`leaf`](Self::leaf), but with an `icon` shown to the left of the label.
     ///
-    /// The icon is any [`Element`] (an [`svg`](iced::widget::svg), [`image`](iced::widget::image)
-    /// or even a text glyph) and is rendered, centered, in a fixed-width column reserved on *every*
-    /// leaf and submenu row — so labels stay aligned whether or not a given entry has an icon.
-    /// Size your icon to about 16×16 to match the column; you control its color (no auto-tinting).
-    pub fn leaf_with_icon(
-        label: impl iced::widget::text::IntoFragment<'a>,
-        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
-        on_press: Message,
-    ) -> Self {
-        Self::leaf_with_icon_styled(label, icon, on_press, menu_item_style)
-    }
-
-    /// Like [`leaf_with_icon`](Self::leaf_with_icon), but with a custom [`button`] style.
-    pub fn leaf_with_icon_styled(
-        label: impl iced::widget::text::IntoFragment<'a>,
-        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
-        on_press: Message,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
-    ) -> Self {
-        Self::leaf_core(label, Some(icon.into()), None, on_press, style)
-    }
-
-    /// Shared layout for [`leaf`](Self::leaf), [`leaf_with_icon`](Self::leaf_with_icon) and
-    /// [`action`](Self::action): a full-width button whose row reserves a fixed-width icon column,
-    /// the label, and an optional right-aligned hotkey hint.
-    fn leaf_core(
-        label: impl iced::widget::text::IntoFragment<'a>,
-        icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
-        hotkey: Option<iced::widget::text::Fragment<'a>>,
-        on_press: Message,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
-    ) -> Self {
-        use iced::alignment::Vertical;
-        use iced::widget::{button, row, text};
-
-        let mut content = row![icon_slot(icon), text(label).width(Length::Fill)]
-            .align_y(Vertical::Center)
-            .spacing(8);
-        if let Some(hotkey) = hotkey {
-            content = content.push(hotkey_label(hotkey));
-        }
-
-        Self::new(
-            button(content)
-                .width(Length::Fill)
-                .padding([5, 12])
-                .style(style)
-                .on_press(on_press),
+    /// For an icon, a keyboard-shortcut hint or a custom style, use the [`action`](Self::action)
+    /// builder instead.
+    pub fn leaf(label: impl iced::widget::text::IntoFragment<'a>, on_press: Message) -> Self {
+        Self::leaf_core(
+            label.into_fragment(),
+            None,
+            None,
+            on_press,
+            Box::new(menu_item_style),
         )
     }
 
@@ -1073,101 +1008,82 @@ where
         }
     }
 
-    /// Creates a root [`Item`]: a content-sized button that opens `menu`, styled with the crate's
-    /// default [`menu_item_style`]. Use this for the top-level entries of a [`MenuBar`](crate::MenuBar)
-    /// so that the bar buttons hug their labels instead of stretching across the bar.
+    /// Starts building a submenu [`Item`]: a full-width menu row that opens a nested `menu` to the
+    /// side. Chain [`icon`](SubmenuBuilder::icon) and/or [`style`](SubmenuBuilder::style), then
+    /// finish with [`build`](SubmenuBuilder::build) (or rely on its `Into<Item>`).
     ///
-    /// `on_press` is attached so the button renders as active rather than disabled — the menu
-    /// opening itself is handled by the [`MenuBar`](crate::MenuBar); a no-op message is fine.
-    pub fn root(
+    /// Use this for entries **inside** a [`Menu`]; like [`leaf`](Self::leaf) it fills the row so its
+    /// hover highlight spans the whole width, and it keeps a trailing chevron. For top-level bar
+    /// entries use [`root`](Self::root). No message is needed — the menu bar opens the submenu.
+    pub fn submenu(
         label: impl iced::widget::text::IntoFragment<'a>,
-        on_press: Message,
         menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
-    ) -> Self {
-        Self::root_styled(label, on_press, menu, menu_item_style)
+    ) -> SubmenuBuilder<'a, Message> {
+        SubmenuBuilder {
+            label: label.into_fragment(),
+            menu,
+            icon: None,
+            style: None,
+        }
     }
 
-    /// Like [`root`](Self::root), but with a custom [`button`] style.
-    pub fn root_styled(
+    /// Starts building a root [`Item`]: a content-sized button that opens `menu`. Chain
+    /// [`style`](RootBuilder::style), then finish with [`build`](RootBuilder::build) (or rely on
+    /// its `Into<Item>`).
+    ///
+    /// Use this for the top-level entries of a [`MenuBar`](crate::MenuBar) so the bar buttons hug
+    /// their labels instead of stretching across the bar. No message is needed — the menu bar
+    /// opens the menu.
+    pub fn root(
         label: impl iced::widget::text::IntoFragment<'a>,
-        on_press: Message,
         menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
-    ) -> Self {
-        use iced::widget::{button, text};
-
-        Self::with_menu(
-            button(text(label)).padding([5, 10]).style(style).on_press(on_press),
+    ) -> RootBuilder<'a, Message> {
+        RootBuilder {
+            label: label.into_fragment(),
             menu,
+            style: None,
+        }
+    }
+
+    /// Shared layout for [`leaf`](Self::leaf) and the [`action`](Self::action) builder: a
+    /// full-width button whose row reserves a fixed-width icon column, the label, and an optional
+    /// right-aligned hotkey hint.
+    fn leaf_core(
+        label: iced::widget::text::Fragment<'a>,
+        icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
+        hotkey: Option<iced::widget::text::Fragment<'a>>,
+        on_press: Message,
+        style: ButtonStyleFn<'a>,
+    ) -> Self {
+        use iced::alignment::Vertical;
+        use iced::widget::{button, row, text};
+
+        let mut content = row![icon_slot(icon), text(label).width(Length::Fill)]
+            .align_y(Vertical::Center)
+            .spacing(8);
+        if let Some(hotkey) = hotkey {
+            content = content.push(hotkey_label(hotkey));
+        }
+
+        Self::new(
+            button(content)
+                .width(Length::Fill)
+                .padding([5, 12])
+                .style(style)
+                .on_press(on_press),
         )
     }
 
-    /// Creates a submenu [`Item`]: a full-width menu row that opens a nested `menu` to the side,
-    /// styled with the crate's default [`menu_item_style`].
+    /// Shared layout for the [`submenu`](Self::submenu) builder: a full-width button whose row
+    /// reserves a fixed-width icon column, the label, and a trailing submenu chevron.
     ///
-    /// Use this for entries **inside** a [`Menu`]; like [`leaf`](Self::leaf) it fills the row so its
-    /// hover highlight spans the whole width. For top-level bar entries use [`root`](Self::root).
-    ///
-    /// `on_press` is attached so the button renders as active rather than disabled — the menu
-    /// opening itself is handled by the [`MenuBar`](crate::MenuBar); a no-op message is fine.
-    pub fn submenu(
-        label: impl iced::widget::text::IntoFragment<'a>,
-        on_press: Message,
-        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
-    ) -> Self {
-        Self::submenu_styled(label, on_press, menu, menu_item_style)
-    }
-
-    /// Like [`submenu`](Self::submenu), but with a custom [`button`] style.
-    pub fn submenu_styled(
-        label: impl iced::widget::text::IntoFragment<'a>,
-        on_press: Message,
-        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
-    ) -> Self {
-        Self::submenu_core(label, None, on_press, menu, style)
-    }
-
-    /// Like [`submenu`](Self::submenu), but with an `icon` shown to the left of the label.
-    ///
-    /// The icon is any [`Element`] (an [`svg`](iced::widget::svg), [`image`](iced::widget::image)
-    /// or even a text glyph) and is rendered, centered, in a fixed-width column reserved on *every*
-    /// leaf and submenu row — so labels stay aligned whether or not a given entry has an icon. The
-    /// submenu chevron remains on the right. Size your icon to about 16×16 to match the column; you
-    /// control its color (no auto-tinting).
-    pub fn submenu_with_icon(
-        label: impl iced::widget::text::IntoFragment<'a>,
-        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
-        on_press: Message,
-        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
-    ) -> Self {
-        Self::submenu_with_icon_styled(label, icon, on_press, menu, menu_item_style)
-    }
-
-    /// Like [`submenu_with_icon`](Self::submenu_with_icon), but with a custom [`button`] style.
-    pub fn submenu_with_icon_styled(
-        label: impl iced::widget::text::IntoFragment<'a>,
-        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
-        on_press: Message,
-        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
-    ) -> Self {
-        Self::submenu_core(label, Some(icon.into()), on_press, menu, style)
-    }
-
-    /// Shared layout for [`submenu`](Self::submenu) and
-    /// [`submenu_with_icon`](Self::submenu_with_icon): a full-width button whose row reserves a
-    /// fixed-width icon column, the label, and a trailing submenu chevron.
+    /// The button carries no `on_press` — the [`MenuBar`](crate::MenuBar) drives opening from the
+    /// cursor — so [`menu_item_style`] renders its `Disabled` state like `Active`.
     fn submenu_core(
-        label: impl iced::widget::text::IntoFragment<'a>,
+        label: iced::widget::text::Fragment<'a>,
         icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
-        on_press: Message,
         menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
+        style: ButtonStyleFn<'a>,
     ) -> Self {
         use iced::alignment::Vertical;
         use iced::widget::{button, row, text};
@@ -1181,7 +1097,22 @@ where
             .width(Length::Fill)
             .padding([5, 12])
             .style(style)
-            .on_press(on_press),
+            .on_press_maybe(None),
+            menu,
+        )
+    }
+
+    /// Shared layout for the [`root`](Self::root) builder: a content-sized button that opens a
+    /// menu. Like [`submenu_core`](Self::submenu_core) it carries no `on_press`.
+    fn root_core(
+        label: iced::widget::text::Fragment<'a>,
+        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+        style: ButtonStyleFn<'a>,
+    ) -> Self {
+        use iced::widget::{button, text};
+
+        Self::with_menu(
+            button(text(label)).padding([5, 10]).style(style).on_press_maybe(None),
             menu,
         )
     }
@@ -1216,8 +1147,7 @@ where
     Message: Clone + 'a,
 {
     /// Sets the icon shown to the left of the label, in the fixed-width column reserved on every
-    /// leaf/submenu row. The icon is any [`Element`]; size it to about 16×16 (see
-    /// [`Item::leaf_with_icon`]). You control its color.
+    /// leaf/submenu row. The icon is any [`Element`]; size it to about 16×16. You control its color.
     pub fn icon(
         mut self,
         icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
@@ -1256,6 +1186,102 @@ where
     Message: Clone + 'a,
 {
     fn from(builder: ActionBuilder<'a, Message>) -> Self {
+        builder.build()
+    }
+}
+
+/// A chainable builder for a submenu [`Item`] on the built-in [`iced::Theme`].
+///
+/// Created by [`Item::submenu`]. The icon and style are optional; finish with
+/// [`build`](Self::build) or rely on its [`From`]/`Into<Item>` conversion. No message is needed —
+/// the [`MenuBar`](crate::MenuBar) opens the nested menu.
+#[must_use]
+pub struct SubmenuBuilder<'a, Message> {
+    label: iced::widget::text::Fragment<'a>,
+    menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+    icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
+    style: Option<ButtonStyleFn<'a>>,
+}
+
+impl<'a, Message> SubmenuBuilder<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    /// Sets the icon shown to the left of the label, in the fixed-width column reserved on every
+    /// leaf/submenu row. The icon is any [`Element`]; size it to about 16×16. You control its color.
+    pub fn icon(
+        mut self,
+        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+    ) -> Self {
+        self.icon = Some(icon.into());
+        self
+    }
+
+    /// Swaps in a custom [`button`] style, replacing the crate's default [`menu_item_style`].
+    pub fn style(
+        mut self,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
+        self.style = Some(Box::new(style));
+        self
+    }
+
+    /// Finishes building, producing the submenu [`Item`].
+    pub fn build(self) -> Item<'a, Message, iced::Theme, iced::Renderer> {
+        let style = self.style.unwrap_or_else(|| Box::new(menu_item_style));
+        Item::submenu_core(self.label, self.icon, self.menu, style)
+    }
+}
+
+impl<'a, Message> From<SubmenuBuilder<'a, Message>>
+    for Item<'a, Message, iced::Theme, iced::Renderer>
+where
+    Message: Clone + 'a,
+{
+    fn from(builder: SubmenuBuilder<'a, Message>) -> Self {
+        builder.build()
+    }
+}
+
+/// A chainable builder for a root (menu-bar) [`Item`] on the built-in [`iced::Theme`].
+///
+/// Created by [`Item::root`]. The style is optional; finish with [`build`](Self::build) or rely on
+/// its [`From`]/`Into<Item>` conversion. No message is needed — the [`MenuBar`](crate::MenuBar)
+/// opens the menu.
+#[must_use]
+pub struct RootBuilder<'a, Message> {
+    label: iced::widget::text::Fragment<'a>,
+    menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+    style: Option<ButtonStyleFn<'a>>,
+}
+
+impl<'a, Message> RootBuilder<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    /// Swaps in a custom [`button`] style, replacing the crate's default [`menu_item_style`].
+    pub fn style(
+        mut self,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
+        self.style = Some(Box::new(style));
+        self
+    }
+
+    /// Finishes building, producing the root [`Item`].
+    pub fn build(self) -> Item<'a, Message, iced::Theme, iced::Renderer> {
+        let style = self.style.unwrap_or_else(|| Box::new(menu_item_style));
+        Item::root_core(self.label, self.menu, style)
+    }
+}
+
+impl<'a, Message> From<RootBuilder<'a, Message>> for Item<'a, Message, iced::Theme, iced::Renderer>
+where
+    Message: Clone + 'a,
+{
+    fn from(builder: RootBuilder<'a, Message>) -> Self {
         builder.build()
     }
 }

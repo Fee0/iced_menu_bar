@@ -28,15 +28,13 @@
 //! ```
 
 mod common;
-mod error;
 mod flex;
 mod menu;
 mod menu_bar;
 mod overlay;
 mod style;
 
-pub use common::{DrawPath, ScrollSpeed};
-pub use error::{Error, Result};
-pub use menu::{ActionBuilder, Item, Menu, separator};
+pub use common::{Dismiss, PathHighlight, ScrollSpeed};
+pub use menu::{ActionBuilder, Item, Menu, RootBuilder, SubmenuBuilder, separator};
 pub use menu_bar::MenuBar;
-pub use style::{Catalog, Status, Style, StyleFn, menu_item_style, primary};
+pub use style::{Catalog, Status, Style, StyleFn, default_style, menu_item_style};

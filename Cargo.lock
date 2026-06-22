@@ -1308,7 +1308,6 @@ name = "iced_menu_bar"
 version = "0.1.0"
 dependencies = [
  "iced",
- "thiserror 2.0.18",
 ]
 
 [[package]]

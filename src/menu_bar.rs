@@ -112,8 +112,6 @@ where
     padding: Padding,
     width: Length,
     height: Length,
-    close_on_item_click: Option<bool>,
-    close_on_background_click: Option<bool>,
     pub(crate) global_parameters: GlobalParameters<'a, Theme>,
 }
 impl<'a, Message, Theme, Renderer> MenuBar<'a, Message, Theme, Renderer>
@@ -140,28 +138,21 @@ where
             },
             width: Length::Shrink,
             height: Length::Shrink,
-            close_on_item_click: None,
-            close_on_background_click: None,
             global_parameters: GlobalParameters {
                 safe_bounds_margin: 40.0,
-                draw_path: DrawPath::FakeHovering,
+                // `Fill` draws a backdrop behind the active path regardless of widget state. The
+                // built-in `root`/`submenu` buttons carry no `on_press` (iced renders them as
+                // `Disabled`, which never reports `Hovered`), so `Hover` would not highlight them.
+                path_highlight: PathHighlight::Fill,
                 scroll_speed: ScrollSpeed {
-                    line: 60.0,
-                    pixel: 1.0,
+                    per_line: 60.0,
+                    per_pixel: 1.0,
                 },
                 close_on_item_click: true,
                 close_on_background_click: false,
                 class: Theme::default(),
             },
         }
-    }
-
-    /// Creates a [`MenuBar`] with the given root items, returning an error if `roots` is empty.
-    pub fn try_new(roots: Vec<Item<'a, Message, Theme, Renderer>>) -> crate::Result<Self> {
-        if roots.is_empty() {
-            return Err(crate::Error::EmptyMenu);
-        }
-        Ok(Self::new(roots))
     }
 
     /// Sets the width of the [`MenuBar`].
@@ -182,18 +173,19 @@ where
         self
     }
 
-    /// Sets the margin of the safe bounds of the [`Menu`]s in the [`MenuBar`].
+    /// Sets how forgiving the menus are about the cursor briefly leaving them.
     ///
-    /// Defines a rectangular safe area that extends each menu's background bounds by a margin.
-    /// If the cursor moves outside this area, the menu will be closed.
-    pub fn safe_bounds_margin(mut self, margin: f32) -> Self {
+    /// Each open menu keeps a rectangular safe area that extends its background by `margin`
+    /// pixels; the menu stays open while the cursor is inside it and closes once the cursor
+    /// leaves. Larger values are more forgiving of imprecise mouse movement.
+    pub fn hover_grace(mut self, margin: f32) -> Self {
         self.global_parameters.safe_bounds_margin = margin;
         self
     }
 
-    /// Sets the draw path option of the [`MenuBar`]
-    pub fn draw_path(mut self, draw_path: DrawPath) -> Self {
-        self.global_parameters.draw_path = draw_path;
+    /// Sets how the active path — the trail of open entries — is highlighted.
+    pub fn path_highlight(mut self, path_highlight: PathHighlight) -> Self {
+        self.global_parameters.path_highlight = path_highlight;
         self
     }
 
@@ -203,27 +195,13 @@ where
         self
     }
 
-    /// Sets the close on item click option of the [`MenuBar`]
-    pub fn close_on_item_click(mut self, value: bool) -> Self {
-        self.close_on_item_click = Some(value);
-        self
-    }
-
-    /// Sets the close on background click option of the [`MenuBar`]
-    pub fn close_on_background_click(mut self, value: bool) -> Self {
-        self.close_on_background_click = Some(value);
-        self
-    }
-
-    /// Sets the global default close on item click option
-    pub fn close_on_item_click_global(mut self, value: bool) -> Self {
-        self.global_parameters.close_on_item_click = value;
-        self
-    }
-
-    /// Sets the global default close on background click option
-    pub fn close_on_background_click_global(mut self, value: bool) -> Self {
-        self.global_parameters.close_on_background_click = value;
+    /// Sets when an open menu tree is dismissed (the default is [`Dismiss::OnItemClick`]).
+    ///
+    /// This is the bar-wide policy; individual entries can override it with
+    /// [`Item::keep_open`](crate::Item::keep_open) or [`Item::close_on_click`](crate::Item::close_on_click).
+    /// A click outside the menus always dismisses them regardless of this setting.
+    pub fn dismiss(mut self, dismiss: Dismiss) -> Self {
+        self.global_parameters.close_on_item_click = matches!(dismiss, Dismiss::OnItemClick);
         self
     }
 
@@ -336,7 +314,10 @@ where
 
         bar_menu_state.slice = slice;
 
-        let slice_node = if slice.start_index == slice.end_index {
+        let slice_node = if self.roots.is_empty() {
+            // No root entries: nothing to slice, just an empty placeholder child.
+            Node::new(Size::ZERO)
+        } else if slice.start_index == slice.end_index {
             let node = &items_node.children()[slice.start_index];
             let bounds = node.bounds();
             let start_offset = slice.lower_bound_rel - bounds.x;
@@ -436,8 +417,6 @@ where
                         &mut self.roots,
                         slice_layout.children(),
                         cursor,
-                        self.close_on_item_click,
-                        self.close_on_background_click,
                     );
                 } else {
                     global_state.schedule(MenuBarTask::OpenOnClick);
@@ -485,8 +464,8 @@ where
             {
                 let scroll_speed = self.global_parameters.scroll_speed;
                 let delta_x = match delta {
-                    mouse::ScrollDelta::Lines { x, .. } => x * scroll_speed.line,
-                    mouse::ScrollDelta::Pixels { x, .. } => x * scroll_speed.pixel,
+                    mouse::ScrollDelta::Lines { x, .. } => x * scroll_speed.per_line,
+                    mouse::ScrollDelta::Pixels { x, .. } => x * scroll_speed.per_pixel,
                 };
 
                 let min_offset = -(slice_layout.bounds().width - layout.bounds().width);
@@ -587,8 +566,8 @@ where
             styling.bar_background,
         );
 
-        if let (DrawPath::Backdrop, true, Some(active)) = (
-            &self.global_parameters.draw_path,
+        if let (PathHighlight::Fill, true, Some(active)) = (
+            &self.global_parameters.path_highlight,
             global_state.open,
             bar_menu_state.active,
         ) {

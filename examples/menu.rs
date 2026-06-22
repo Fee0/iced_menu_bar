@@ -4,10 +4,10 @@
 //!
 //! It shows:
 //! - a [`MenuBar`] with several root items,
-//! - the built-in [`Item::root`] / [`Item::leaf`] / [`Item::submenu`] constructors and [`separator`],
+//! - the built-in [`Item::root`] / [`Item::leaf`] / [`Item::submenu`] / [`Item::action`] builders
+//!   and [`separator`],
 //! - nested submenus,
-//! - [`Item::close_on_click`] overrides,
-//! - the fallible [`Menu::try_new`] constructor returning [`iced_menu_bar::Result`],
+//! - the [`Item::keep_open`] per-item dismiss override,
 //! - and the crate's built-in default styling (no custom `.style(..)` needed).
 
 use iced::widget::{column, container, svg, text};
@@ -40,15 +40,12 @@ struct App {
 enum Message {
     /// A leaf menu entry was selected.
     Selected(&'static str),
-    /// A root / submenu button was pressed (needed so the button renders as active).
-    OpenMenu,
 }
 
 impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Selected(label) => self.last_action = Some(label.to_owned()),
-            Message::OpenMenu => {}
         }
         Task::none()
     }
@@ -65,17 +62,16 @@ impl App {
 
 /// Builds the menu bar, exercising most of the builder surface.
 fn menu_bar() -> Element<'static, Message> {
-    // Leaves, roots and submenu entries all come from the crate now — no hand-built
-    // buttons. `Item::root` is the content-sized top-level bar button; `Item::submenu` is a
-    // full-width in-menu entry that opens a nested flyout; the `*_styled` variants would let us
-    // swap in a custom button style per item.
-    // `Item::action(..)` is a builder for action rows: chain `.icon(..)` (a fixed-width column on
-    // the left, reserved on every row so labels align) and/or `.hotkey(..)` (a dimmed, right-aligned
-    // shortcut hint), then `.build()`. Hotkeys are display-only and not available on submenus, which
-    // keep their right-side chevron. "Exit" has neither, yet still lines up with the rows above.
+    // Leaves, roots and submenu entries all come from the crate now — no hand-built buttons.
+    // `Item::root(label, menu)` is the content-sized top-level bar button; `Item::submenu(label,
+    // menu)` is a full-width in-menu entry that opens a nested flyout. Neither needs a message —
+    // the `MenuBar` opens them. Both are builders: chain `.icon(..)` / `.style(..)` and `.build()`.
+    // `Item::action(label, msg)` is the builder for action rows: chain `.icon(..)` (a fixed-width
+    // column on the left, reserved on every row so labels align) and/or `.hotkey(..)` (a dimmed,
+    // right-aligned shortcut hint), then `.build()`. Hotkeys are display-only and not available on
+    // submenus, which keep their right-side chevron. "Exit" has neither, yet still lines up.
     let file = Item::root(
         "File",
-        Message::OpenMenu,
         Menu::new(vec![
             Item::action("New", Message::Selected("New"))
                 .icon(icon(NEW_ICON))
@@ -88,33 +84,30 @@ fn menu_bar() -> Element<'static, Message> {
             // A hotkey with no icon — still right-aligned, label still lines up via the icon column.
             Item::action("Save", Message::Selected("Save")).hotkey("⌘S").build(),
             separator(),
-            Item::submenu_with_icon(
+            Item::submenu(
                 "Open Recent",
-                icon(OPEN_ICON),
-                Message::OpenMenu,
                 Menu::new(vec![leaf("project.hex"), leaf("notes.txt")]),
-            ),
+            )
+            .icon(icon(OPEN_ICON))
+            .build(),
             separator(),
             leaf("Exit"),
         ]),
-    );
+    )
+    .build();
 
     let edit = Item::root(
         "Edit",
-        Message::OpenMenu,
         Menu::new(vec![
             leaf("Cut"),
             // Keep the menu open after clicking "Copy".
-            leaf("Copy").close_on_click(false),
+            leaf("Copy").keep_open(),
             leaf("Paste"),
         ]),
-    );
+    )
+    .build();
 
-    // `try_new` rejects an empty item list — here it always succeeds.
-    let help_menu = Menu::try_new(vec![leaf("About")])
-        .expect("the help menu is non-empty")
-        .width(160);
-    let help = Item::root("Help", Message::OpenMenu, help_menu);
+    let help = Item::root("Help", Menu::new(vec![leaf("About")]).width(160)).build();
 
     MenuBar::new(vec![file, edit, help]).width(Fill).into()
 }

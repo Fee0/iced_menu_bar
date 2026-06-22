@@ -6,4 +6,3 @@ description = "A custom menu-bar widget for iced with element-based items, subme
 
 [dependencies]
 iced = { version = "0.14", features = ["advanced", "svg"] }
-thiserror = "2"

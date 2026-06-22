@@ -363,13 +363,13 @@ where
                     tree,
                     ..
                 } = self;
-                let draw_path = menu_bar.global_parameters.draw_path;
-                let cursor = match draw_path {
-                    DrawPath::FakeHovering => {
+                let path_highlight = menu_bar.global_parameters.path_highlight;
+                let cursor = match path_highlight {
+                    PathHighlight::Hover => {
                         let center = parent_bounds.center();
                         mouse::Cursor::Available(center - self.translation)
                     }
-                    DrawPath::Backdrop => mouse::Cursor::Unavailable,
+                    PathHighlight::Fill => mouse::Cursor::Unavailable,
                 };
 
                 let slice_layout = layout.children().next().unwrap();
@@ -776,7 +776,7 @@ where
             let menu_state = menu_tree.state.downcast_ref::<MenuState>();
 
             menu.draw(
-                &global_parameters.draw_path,
+                &global_parameters.path_highlight,
                 menu_tree,
                 renderer,
                 theme,

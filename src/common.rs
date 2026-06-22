@@ -10,33 +10,23 @@ use crate::menu::{Item, MenuState};
 use crate::menu_bar::{GlobalState, MenuBarTask};
 use crate::style::Catalog;
 
-///
-/// ## FakeHovering:
-///
-/// Places cursors at the path items,
-/// useful when you want to customize the styling of each item in the path,
-/// or you simple want the look of the items when they are hovered over.
-///
-/// The downside is when some widget in the path don't response to hovering,
-/// the path won't be fully drawn, and when you want uniform path styling
-/// but some widget response to hovering differently.
-///
-/// ## Backdrop:
-///
-/// Draws a rectangle behind each path item,
-/// requires path items to have transparent backgrounds,
-/// useful when you want uniform path styling.
-///
-/// The downside is,
-/// depending on the style you're going for,
-/// oftentimes manually syncing the path's styling to the path items' is necessary,
-/// the default styling simply can't cover most use cases.
+/// How the active path — the trail of open entries leading to the current submenu — is
+/// highlighted.
 #[derive(Debug, Clone, Copy)]
-pub enum DrawPath {
-    /// FakeHovering
-    FakeHovering,
-    /// Backdrop
-    Backdrop,
+pub enum PathHighlight {
+    /// Highlights each path entry by placing a cursor over it, so it renders in its own
+    /// hovered style.
+    ///
+    /// Lets every entry keep its individual hover appearance, but an entry whose widget does
+    /// not react to hovering will not be highlighted.
+    Hover,
+    /// Highlights each path entry by drawing a rectangle behind it (see [`Style::path`]).
+    ///
+    /// Gives uniform highlighting regardless of the entries' own hover behaviour, but expects
+    /// path entries to have transparent backgrounds.
+    ///
+    /// [`Style::path`]: crate::Style::path
+    Fill,
 }
 
 /// X+ goes right and Y+ goes down
@@ -93,10 +83,10 @@ pub(crate) enum RecEvent {
 #[derive(Debug, Clone, Copy)]
 /// Scroll speed
 pub struct ScrollSpeed {
-    /// Speed of line-based scroll movement
-    pub line: f32,
-    /// Speed of Pixel scroll movement
-    pub pixel: f32,
+    /// Pixels scrolled per reported line of line-based wheel movement.
+    pub per_line: f32,
+    /// Pixels scrolled per reported pixel of pixel-precise (trackpad) movement.
+    pub per_pixel: f32,
 }
 
 pub(crate) fn pad_rectangle(rect: Rectangle, padding: Padding) -> Rectangle {
@@ -184,10 +174,24 @@ pub(crate) fn clip_node_x(node: &Node, width: f32, offset: f32) -> Node {
     .translate([offset, 0.0])
 }
 
+/// When an open menu tree should be dismissed.
+///
+/// Set on the [`MenuBar`](crate::MenuBar) with [`MenuBar::dismiss`](crate::MenuBar::dismiss); a
+/// click outside the menus always dismisses them regardless of this setting. Individual entries
+/// can opt out with [`Item::keep_open`](crate::Item::keep_open) or back in with
+/// [`Item::close_on_click`](crate::Item::close_on_click).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dismiss {
+    /// Clicking any entry closes the whole menu tree (the default).
+    OnItemClick,
+    /// Entries keep the menu open when clicked; only a click outside dismisses it.
+    Manual,
+}
+
 /// Parameters that are shared by all menus in the menu bar
 pub(crate) struct GlobalParameters<'a, Theme: Catalog> {
     pub(crate) safe_bounds_margin: f32,
-    pub(crate) draw_path: DrawPath,
+    pub(crate) path_highlight: PathHighlight,
     pub(crate) scroll_speed: ScrollSpeed,
     pub(crate) close_on_item_click: bool,
     pub(crate) close_on_background_click: bool,
@@ -241,59 +245,45 @@ pub(crate) fn schedule_close_on_click<
     items: &mut [Item<'a, Message, Theme, Renderer>],
     slice_layout: impl Iterator<Item = Layout<'b>>,
     cursor: mouse::Cursor,
-    menu_close_on_item_click: Option<bool>,
-    menu_close_on_background_click: Option<bool>,
 ) {
     global_state.clear_task();
 
-    let mut coc_handled = false;
-
-    for (item, layout) in items[slice.start_index..=slice.end_index] // [item...]
+    // Per-item override (`keep_open`/`close_on_click`) wins; otherwise the bar-wide policy.
+    // Clamp the inclusive slice so an empty `items` cannot index out of bounds.
+    let hi = (slice.end_index + 1).min(items.len());
+    let lo = slice.start_index.min(hi);
+    for (item, layout) in items[lo..hi] // [item...]
         .iter_mut()
         .zip(slice_layout)
     {
         if cursor.is_over(layout.bounds()) {
-            if let Some(coc) = item.close_on_click {
-                coc_handled = true;
-                if coc {
-                    global_state.schedule(MenuBarTask::CloseOnClick);
-                }
+            let close = item
+                .close_on_click
+                .unwrap_or(global_parameters.close_on_item_click);
+            if close {
+                global_state.schedule(MenuBarTask::CloseOnClick);
             }
-            for cocfb in [
-                menu_close_on_item_click,
-                Some(global_parameters.close_on_item_click),
-            ] {
-                if let (false, Some(coc)) = (coc_handled, cocfb) {
-                    coc_handled = true;
-                    if coc {
-                        global_state.schedule(MenuBarTask::CloseOnClick);
-                    }
-                }
-            }
-            break;
+            return;
         }
     }
 
-    for cocfb in [
-        menu_close_on_background_click,
-        Some(global_parameters.close_on_background_click),
-    ] {
-        if let (false, Some(coc)) = (coc_handled, cocfb) {
-            coc_handled = true;
-            if coc {
-                global_state.schedule(MenuBarTask::CloseOnClick);
-            }
-        }
+    // The click landed on the menu's own background rather than an entry.
+    if global_parameters.close_on_background_click {
+        global_state.schedule(MenuBarTask::CloseOnClick);
     }
 }
 
 macro_rules! itl_iter_slice {
-    ($slice:expr, $items:expr;$iter_0:ident, $item_trees:expr;$iter_1:ident, $slice_layout:expr) => {
-        $items[$slice.start_index..=$slice.end_index]
+    ($slice:expr, $items:expr;$iter_0:ident, $item_trees:expr;$iter_1:ident, $slice_layout:expr) => {{
+        // Clamp the inclusive slice to a half-open range so an empty `$items` (e.g. a menu/bar
+        // with no entries) yields an empty iterator instead of an out-of-bounds index panic.
+        let __hi = ($slice.end_index + 1).min($items.len());
+        let __lo = $slice.start_index.min(__hi);
+        $items[__lo..__hi]
             .$iter_0()
-            .zip($item_trees[$slice.start_index..=$slice.end_index].$iter_1())
+            .zip($item_trees[__lo..__hi].$iter_1())
             .zip($slice_layout)
-    };
+    }};
 }
 pub(crate) use itl_iter_slice;
 

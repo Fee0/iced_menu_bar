@@ -1,7 +1,7 @@
 //! Theming for the menu bar and its menus.
 //!
 //! The widget is generic over any `Theme` that implements [`Catalog`]. A convenience
-//! implementation is provided for the built-in [`iced::Theme`] via [`primary`].
+//! implementation is provided for the built-in [`iced::Theme`] via [`default_style`].
 
 use iced::widget::button;
 use iced::{Background, Border, Color, Shadow, Theme, Vector};
@@ -96,7 +96,7 @@ impl Catalog for Theme {
     type Class<'a> = StyleFn<'a, Self, Style>;
 
     fn default<'a>() -> Self::Class<'a> {
-        Box::new(primary)
+        Box::new(default_style)
     }
 
     fn style(&self, class: &Self::Class<'_>, status: Status) -> Style {
@@ -109,7 +109,7 @@ impl Catalog for Theme {
 /// A transparent bar over a slightly elevated flyout with a subtle hairline border and a
 /// soft drop shadow — derived from the theme palette so it adapts to light and dark themes.
 #[must_use]
-pub fn primary(theme: &Theme, _status: Status) -> Style {
+pub fn default_style(theme: &Theme, _status: Status) -> Style {
     let palette = theme.extended_palette();
 
     Style {
@@ -135,7 +135,7 @@ pub fn primary(theme: &Theme, _status: Status) -> Style {
 /// The default styling for a menu row or root button on the built-in [`iced::Theme`].
 ///
 /// Transparent by default with an accent fill on hover/press, so the active path reads
-/// clearly against the flyout drawn by [`primary`]. Apply it to the [`button`]s wrapped by
+/// clearly against the flyout drawn by [`default_style`]. Apply it to the [`button`]s wrapped by
 /// your [`Item`](crate::Item)s via [`button::Button::style`] to get the crate's baseline look.
 #[must_use]
 pub fn menu_item_style(theme: &Theme, status: button::Status) -> button::Style {
@@ -154,7 +154,10 @@ pub fn menu_item_style(theme: &Theme, status: button::Status) -> button::Style {
     };
 
     match status {
-        button::Status::Active => base,
+        // `Disabled` renders like `Active`: root and submenu rows carry no `on_press` (the
+        // menu bar drives opening), so iced reports them as disabled even though they are
+        // fully interactive — they must not look greyed out.
+        button::Status::Active | button::Status::Disabled => base,
         button::Status::Hovered => button::Style {
             background: Some(palette.primary.base.color.into()),
             text_color: palette.primary.base.text,
@@ -163,10 +166,6 @@ pub fn menu_item_style(theme: &Theme, status: button::Status) -> button::Style {
         button::Status::Pressed => button::Style {
             background: Some(palette.primary.strong.color.into()),
             text_color: palette.primary.strong.text,
-            ..base
-        },
-        button::Status::Disabled => button::Style {
-            text_color: palette.background.strong.color,
             ..base
         },
     }
