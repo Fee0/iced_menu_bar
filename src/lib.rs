@@ -14,15 +14,15 @@
 //! A convenience implementation is provided for the built-in [`iced::Theme`].
 //!
 //! ```ignore
-//! use iced::widget::button;
 //! use iced_menu_bar::{Item, Menu, MenuBar};
 //!
 //! let menu_bar = MenuBar::new(vec![
-//!     Item::with_menu(
-//!         button("File"),
+//!     Item::root(
+//!         "File",
+//!         Message::OpenMenu,
 //!         Menu::new(vec![
-//!             Item::new(button("New")),
-//!             Item::new(button("Open")).tooltip(button("Open a file")),
+//!             Item::leaf("New", Message::New),
+//!             Item::leaf("Open", Message::Open).tooltip_text("Open a file"),
 //!         ]),
 //!     ),
 //! ]);

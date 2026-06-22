@@ -3,18 +3,18 @@
 //! Run with: `cargo run --example menu`
 //!
 //! It shows:
-//! - a [`MenuBar`] with several configured root items,
-//! - element-based [`Item`]s wrapping ordinary `button`s,
-//! - nested submenus via [`Item::with_menu`],
-//! - per-item [tooltips](Item::tooltip) and a custom separator element,
+//! - a [`MenuBar`] with several root items,
+//! - the built-in [`Item::root`] / [`Item::leaf`] / [`Item::submenu`] constructors and [`separator`],
+//! - nested submenus,
+//! - per-item text tooltips via [`Item::tooltip_text`],
 //! - [`Item::close_on_click`] overrides,
 //! - the fallible [`Menu::try_new`] constructor returning [`iced_menu_bar::Result`],
-//! - and the crate's built-in default bar/flyout styling (no custom `.style(..)` needed).
+//! - and the crate's built-in default styling (no custom `.style(..)` needed).
 
-use iced::widget::{button, column, container, text};
+use iced::widget::{column, container, text};
 use iced::{Element, Fill, Renderer, Task, Theme};
 
-use iced_menu_bar::{Item, Menu, MenuBar, menu_item_style, separator};
+use iced_menu_bar::{Item, Menu, MenuBar, separator};
 
 /// The widget types are generic over the theme, so the example spells out the concrete
 /// `Theme`/`Renderer` it uses (there are no default type parameters to lean on).
@@ -66,30 +66,35 @@ impl App {
 
 /// Builds the menu bar, exercising most of the builder surface.
 fn menu_bar() -> Element<'static, Message> {
-    let dropdown = Menu::new;
-
-    let file = Item::with_menu(
-        root_button("File"),
-        dropdown(vec![
+    // Leaves, roots, submenu entries and tooltips all come from the crate now — no hand-built
+    // buttons. `Item::root` is the content-sized top-level bar button; `Item::submenu` is a
+    // full-width in-menu entry that opens a nested flyout; the `*_styled` variants would let us
+    // swap in a custom button style per item.
+    let file = Item::root(
+        "File",
+        Message::OpenMenu,
+        Menu::new(vec![
             leaf("New"),
-            leaf("Open").tooltip(tooltip_text("Open an existing file")),
+            leaf("Open").tooltip_text("Open an existing file"),
             separator(),
-            Item::with_menu(
-                root_button("Open Recent"),
-                dropdown(vec![leaf("project.hex"), leaf("notes.txt")]),
+            Item::submenu(
+                "Open Recent",
+                Message::OpenMenu,
+                Menu::new(vec![leaf("project.hex"), leaf("notes.txt")]),
             ),
             separator(),
             leaf("Exit"),
         ]),
     );
 
-    let edit = Item::with_menu(
-        root_button("Edit"),
-        dropdown(vec![
+    let edit = Item::root(
+        "Edit",
+        Message::OpenMenu,
+        Menu::new(vec![
             leaf("Cut"),
             // Keep the menu open after clicking "Copy".
             leaf("Copy").close_on_click(false),
-            leaf("Paste").tooltip(tooltip_text("Insert clipboard contents")),
+            leaf("Paste").tooltip_text("Insert clipboard contents"),
         ]),
     );
 
@@ -97,32 +102,12 @@ fn menu_bar() -> Element<'static, Message> {
     let help_menu = Menu::try_new(vec![leaf("About")])
         .expect("the help menu is non-empty")
         .width(160);
-    let help = Item::with_menu(root_button("Help"), help_menu);
+    let help = Item::root("Help", Message::OpenMenu, help_menu);
 
     MenuBar::new(vec![file, edit, help]).width(Fill).into()
 }
 
-/// A leaf entry that publishes [`Message::Selected`] when clicked.
+/// A leaf entry that publishes [`Message::Selected`] with its own label when clicked.
 fn leaf(label: &'static str) -> MenuItem {
-    Item::new(
-        button(text(label))
-            .width(Fill)
-            .padding([5, 12])
-            .style(menu_item_style)
-            .on_press(Message::Selected(label)),
-    )
-}
-
-/// A top-level / submenu button. The `on_press` makes the button look active.
-fn root_button(label: &'static str) -> iced::widget::Button<'static, Message> {
-    button(text(label))
-        .padding([5, 10])
-        .style(menu_item_style)
-        .on_press(Message::OpenMenu)
-}
-
-/// A styled tooltip body. The crate draws the tooltip background/border itself
-/// (using the menu colors), so the body just needs padded, readable text.
-fn tooltip_text(content: &'static str) -> Element<'static, Message> {
-    container(text(content).size(13)).padding([4, 8]).into()
+    Item::leaf(label, Message::Selected(label))
 }

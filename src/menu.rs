@@ -255,7 +255,9 @@ where
             self.height,
             Padding::ZERO,
             self.spacing,
-            Alignment::Center,
+            // Left-align rows: full-width leaves fill the row, while content-sized rows (e.g.
+            // submenu triggers) align to the start instead of being centered.
+            Alignment::Start,
             &mut self
                 .items
                 .iter_mut()
@@ -1065,6 +1067,118 @@ where
         });
 
     Item::new(container(line).padding([4, 6]))
+}
+
+/// App-friendly constructors for the built-in [`iced::Theme`].
+///
+/// These build a styled menu [`button`] for you — the same baseline look as [`menu_item_style`]
+/// and [`separator`] — so a consuming app does not need to assemble buttons by hand. Use the
+/// `*_styled` variants to swap in a custom [`button`] style while keeping the rest of the layout.
+impl<'a, Message> Item<'a, Message, iced::Theme, iced::Renderer>
+where
+    Message: Clone + 'a,
+{
+    /// Creates a leaf [`Item`]: a full-width menu row that publishes `on_press` when clicked,
+    /// styled with the crate's default [`menu_item_style`].
+    pub fn leaf(label: impl iced::widget::text::IntoFragment<'a>, on_press: Message) -> Self {
+        Self::leaf_styled(label, on_press, menu_item_style)
+    }
+
+    /// Like [`leaf`](Self::leaf), but with a custom [`button`] style.
+    pub fn leaf_styled(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        on_press: Message,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
+        use iced::widget::{button, text};
+
+        Self::new(
+            button(text(label))
+                .width(Length::Fill)
+                .padding([5, 12])
+                .style(style)
+                .on_press(on_press),
+        )
+    }
+
+    /// Creates a root [`Item`]: a content-sized button that opens `menu`, styled with the crate's
+    /// default [`menu_item_style`]. Use this for the top-level entries of a [`MenuBar`](crate::MenuBar)
+    /// so that the bar buttons hug their labels instead of stretching across the bar.
+    ///
+    /// `on_press` is attached so the button renders as active rather than disabled — the menu
+    /// opening itself is handled by the [`MenuBar`](crate::MenuBar); a no-op message is fine.
+    pub fn root(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        on_press: Message,
+        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+    ) -> Self {
+        Self::root_styled(label, on_press, menu, menu_item_style)
+    }
+
+    /// Like [`root`](Self::root), but with a custom [`button`] style.
+    pub fn root_styled(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        on_press: Message,
+        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
+        use iced::widget::{button, text};
+
+        Self::with_menu(
+            button(text(label)).padding([5, 10]).style(style).on_press(on_press),
+            menu,
+        )
+    }
+
+    /// Creates a submenu [`Item`]: a full-width menu row that opens a nested `menu` to the side,
+    /// styled with the crate's default [`menu_item_style`].
+    ///
+    /// Use this for entries **inside** a [`Menu`]; like [`leaf`](Self::leaf) it fills the row so its
+    /// hover highlight spans the whole width. For top-level bar entries use [`root`](Self::root).
+    ///
+    /// `on_press` is attached so the button renders as active rather than disabled — the menu
+    /// opening itself is handled by the [`MenuBar`](crate::MenuBar); a no-op message is fine.
+    pub fn submenu(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        on_press: Message,
+        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+    ) -> Self {
+        Self::submenu_styled(label, on_press, menu, menu_item_style)
+    }
+
+    /// Like [`submenu`](Self::submenu), but with a custom [`button`] style.
+    pub fn submenu_styled(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        on_press: Message,
+        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
+        use iced::widget::{button, text};
+
+        Self::with_menu(
+            button(text(label))
+                .width(Length::Fill)
+                .padding([5, 12])
+                .style(style)
+                .on_press(on_press),
+            menu,
+        )
+    }
+}
+
+impl<'a, Message: 'a> Item<'a, Message, iced::Theme, iced::Renderer> {
+    /// Sets a text tooltip shown while this item is hovered.
+    ///
+    /// Convenience over [`tooltip`](Self::tooltip) that wraps `content` in a small padded body;
+    /// the crate draws the tooltip background/border itself using the menu colors.
+    pub fn tooltip_text(self, content: impl iced::widget::text::IntoFragment<'a>) -> Self {
+        use iced::widget::{container, text};
+
+        self.tooltip(container(text(content).size(13)).padding([4, 8]))
+    }
 }
 
 /// Adaptive open direction
