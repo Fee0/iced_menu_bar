@@ -131,20 +131,25 @@ where
 
         Self {
             roots,
-            spacing: Pixels::ZERO,
-            padding: Padding::ZERO,
+            spacing: Pixels(4.0),
+            padding: Padding {
+                top: 0.0,
+                right: 8.0,
+                bottom: 0.0,
+                left: 8.0,
+            },
             width: Length::Shrink,
             height: Length::Shrink,
             close_on_item_click: None,
             close_on_background_click: None,
             global_parameters: GlobalParameters {
-                safe_bounds_margin: 50.0,
+                safe_bounds_margin: 40.0,
                 draw_path: DrawPath::FakeHovering,
                 scroll_speed: ScrollSpeed {
                     line: 60.0,
                     pixel: 1.0,
                 },
-                close_on_item_click: false,
+                close_on_item_click: true,
                 close_on_background_click: false,
                 class: Theme::default(),
             },

@@ -138,12 +138,12 @@ where
         Self {
             items,
             spacing: Pixels::ZERO,
-            max_width: f32::INFINITY,
+            max_width: 280.0,
             width: Length::Fill,
             height: Length::Shrink,
             axis: Axis::Horizontal,
             offset: 0.0,
-            padding: Padding::new(5.0),
+            padding: Padding::new(4.0),
             close_on_item_click: None,
             close_on_background_click: None,
         }
@@ -1041,6 +1041,30 @@ where
             .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
     }
+}
+
+/// A thin horizontal divider [`Item`] for separating groups of entries in a [`Menu`].
+///
+/// It is inert (carries no message) and adapts to the active [`iced::Theme`], matching the
+/// crate's baseline flyout styling from [`primary`](crate::primary).
+pub fn separator<'a, Message>() -> Item<'a, Message, iced::Theme, iced::Renderer>
+where
+    Message: 'a,
+{
+    use iced::widget::{container, text};
+
+    let line = container(text(""))
+        .width(Length::Fill)
+        .height(1)
+        .style(|theme: &iced::Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+                background: Some(palette.background.strong.color.into()),
+                ..container::Style::default()
+            }
+        });
+
+    Item::new(container(line).padding([4, 6]))
 }
 
 /// Adaptive open direction

@@ -9,12 +9,12 @@
 //! - per-item [tooltips](Item::tooltip) and a custom separator element,
 //! - [`Item::close_on_click`] overrides,
 //! - the fallible [`Menu::try_new`] constructor returning [`iced_menu_bar::Result`],
-//! - and a custom [`Catalog`]-style function built on top of [`iced_menu_bar::primary`].
+//! - and the crate's built-in default bar/flyout styling (no custom `.style(..)` needed).
 
 use iced::widget::{button, column, container, text};
 use iced::{Element, Fill, Renderer, Task, Theme};
 
-use iced_menu_bar::{DrawPath, Item, Menu, MenuBar, ScrollSpeed, Status, Style};
+use iced_menu_bar::{Item, Menu, MenuBar, menu_item_style, separator};
 
 /// The widget types are generic over the theme, so the example spells out the concrete
 /// `Theme`/`Renderer` it uses (there are no default type parameters to lean on).
@@ -66,15 +66,7 @@ impl App {
 
 /// Builds the menu bar, exercising most of the builder surface.
 fn menu_bar() -> Element<'static, Message> {
-    // A reusable template so every dropdown shares the same metrics.
-    let dropdown = |items: Vec<MenuItem>| {
-        Menu::new(items)
-            .width(200)
-            .max_width(260.0)
-            .spacing(2.0)
-            .offset(4.0)
-            .padding(4)
-    };
+    let dropdown = Menu::new;
 
     let file = Item::with_menu(
         root_button("File"),
@@ -82,7 +74,6 @@ fn menu_bar() -> Element<'static, Message> {
             leaf("New"),
             leaf("Open").tooltip(tooltip_text("Open an existing file")),
             separator(),
-            // A nested submenu.
             Item::with_menu(
                 root_button("Open Recent"),
                 dropdown(vec![leaf("project.hex"), leaf("notes.txt")]),
@@ -108,19 +99,7 @@ fn menu_bar() -> Element<'static, Message> {
         .width(160);
     let help = Item::with_menu(root_button("Help"), help_menu);
 
-    MenuBar::new(vec![file, edit, help])
-        .width(Fill)
-        .padding([0, 8])
-        .spacing(4.0)
-        .draw_path(DrawPath::FakeHovering)
-        .scroll_speed(ScrollSpeed {
-            line: 60.0,
-            pixel: 1.0,
-        })
-        .safe_bounds_margin(40.0)
-        .close_on_item_click(true)
-        .style(menu_style)
-        .into()
+    MenuBar::new(vec![file, edit, help]).width(Fill).into()
 }
 
 /// A leaf entry that publishes [`Message::Selected`] when clicked.
@@ -128,37 +107,22 @@ fn leaf(label: &'static str) -> MenuItem {
     Item::new(
         button(text(label))
             .width(Fill)
+            .padding([5, 12])
+            .style(menu_item_style)
             .on_press(Message::Selected(label)),
     )
 }
 
 /// A top-level / submenu button. The `on_press` makes the button look active.
 fn root_button(label: &'static str) -> iced::widget::Button<'static, Message> {
-    button(text(label)).on_press(Message::OpenMenu)
+    button(text(label))
+        .padding([5, 10])
+        .style(menu_item_style)
+        .on_press(Message::OpenMenu)
 }
 
-/// A thin horizontal divider used between groups of entries.
-fn separator() -> MenuItem {
-    let line = container(text(""))
-        .width(Fill)
-        .height(1)
-        .style(|theme: &Theme| container::Style {
-            background: Some(theme.extended_palette().background.strong.color.into()),
-            ..container::Style::default()
-        });
-    Item::new(container(line).padding([4, 6]))
-}
-
-/// A styled tooltip body.
+/// A styled tooltip body. The crate draws the tooltip background/border itself
+/// (using the menu colors), so the body just needs padded, readable text.
 fn tooltip_text(content: &'static str) -> Element<'static, Message> {
     container(text(content).size(13)).padding([4, 8]).into()
-}
-
-/// A custom style function on top of the built-in [`iced_menu_bar::primary`] default.
-fn menu_style(theme: &Theme, status: Status) -> Style {
-    let palette = theme.extended_palette();
-    let mut style = iced_menu_bar::primary(theme, status);
-    style.menu_background = palette.background.weak.color.into();
-    style.menu_border.radius = 6.0.into();
-    style
 }
