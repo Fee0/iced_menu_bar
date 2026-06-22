@@ -30,10 +30,14 @@ pub struct Style {
     /// The shadow of the menus.
     pub menu_shadow: Shadow,
 
-    /// The background of the active-path highlight.
+    /// The background of the highlight drawn behind the active/focused entry (for both mouse and
+    /// keyboard).
     pub path: Background,
-    /// The border of the active-path highlight.
+    /// The border of the highlight.
     pub path_border: Border,
+
+    /// The color of the hairline drawn by [`separator`](crate::separator).
+    pub separator: Color,
 }
 
 impl Default for Style {
@@ -45,7 +49,6 @@ impl Default for Style {
                 ..Default::default()
             },
             bar_shadow: Shadow::default(),
-
             menu_background: Color::from([0.85; 3]).into(),
             menu_border: Border {
                 radius: 8.0.into(),
@@ -61,6 +64,7 @@ impl Default for Style {
                 radius: 6.0.into(),
                 ..Default::default()
             },
+            separator: Color::from([0.5; 3]),
         }
     }
 }
@@ -116,6 +120,7 @@ pub fn default_style(theme: &Theme) -> Style {
         },
         path: Background::Color(palette.primary.weak.color),
         path_border: Border::default(),
+        separator: palette.background.strong.color,
     }
 }
 
@@ -158,8 +163,8 @@ pub fn menu_item_style(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-/// Opacity applied to a disabled entry's text, so it reads clearly greyed out.
-const DISABLED_ALPHA: f32 = 0.4;
+/// Default opacity applied to a disabled entry's text, so it reads clearly greyed out.
+pub const DISABLED_ALPHA: f32 = 0.4;
 
 /// The styling for a disabled menu row on the built-in [`iced::Theme`].
 ///
@@ -168,13 +173,26 @@ const DISABLED_ALPHA: f32 = 0.4;
 /// [`disabled`](crate::ActionBuilder::disabled) is set; unlike [`menu_item_style`] it must not
 /// rely on `button::Status::Disabled` (which that style deliberately draws like `Active`).
 #[must_use]
-pub fn menu_item_disabled_style(theme: &Theme, _status: button::Status) -> button::Style {
+pub fn menu_item_disabled_style(theme: &Theme, status: button::Status) -> button::Style {
+    menu_item_disabled_style_with(theme, status, DISABLED_ALPHA)
+}
+
+/// Like [`menu_item_disabled_style`], but with a caller-chosen text opacity.
+///
+/// Used by [`ActionBuilder::disabled_alpha`](crate::ActionBuilder::disabled_alpha) to tune how
+/// strongly a disabled row is greyed out.
+#[must_use]
+pub fn menu_item_disabled_style_with(
+    theme: &Theme,
+    _status: button::Status,
+    alpha: f32,
+) -> button::Style {
     let palette = theme.extended_palette();
 
     button::Style {
         background: Some(Background::Color(Color::TRANSPARENT)),
         text_color: Color {
-            a: DISABLED_ALPHA,
+            a: alpha,
             ..palette.background.base.text
         },
         border: Border {

@@ -111,7 +111,10 @@ fn menu_bar() -> Element<'static, Message> {
 
     let help = Item::root("Help", Menu::new(vec![leaf("About")]).width(160)).build();
 
-    MenuBar::new(vec![file, edit, help]).width(Fill).into()
+    MenuBar::new(vec![file, edit, help])
+        .width(Fill)
+        .open_on_hover(true)
+        .into()
 }
 
 /// A leaf entry that publishes [`Message::Selected`] with its own label when clicked.

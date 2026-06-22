@@ -17,8 +17,8 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell, renderer};
 use iced::time::Instant;
 use iced::{
-    Alignment, Element, Event, Length, Padding, Pixels, Point, Rectangle, Size, Vector, mouse,
-    window,
+    Alignment, Color, Element, Event, Length, Padding, Pixels, Point, Rectangle, Size, Vector,
+    mouse, window,
 };
 use std::iter::once;
 
@@ -133,6 +133,7 @@ where
     pub(crate) axis: Axis,
     pub(crate) offset: f32,
     pub(crate) padding: Padding,
+    pub(crate) align_items: Alignment,
 }
 impl<'a, Message, Theme, Renderer> Menu<'a, Message, Theme, Renderer>
 where
@@ -150,6 +151,7 @@ where
             axis: Axis::Horizontal,
             offset: 0.0,
             padding: Padding::new(4.0),
+            align_items: Alignment::Start,
         }
     }
 
@@ -162,6 +164,19 @@ where
     /// Sets the width of the [`Menu`].
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
+        self
+    }
+
+    /// Sets the height of the [`Menu`].
+    pub fn height(mut self, height: impl Into<Length>) -> Self {
+        self.height = height.into();
+        self
+    }
+
+    /// Sets the cross-axis alignment of the [`Menu`]'s rows (defaults to
+    /// [`Alignment::Start`]).
+    pub fn align_items(mut self, align: impl Into<Alignment>) -> Self {
+        self.align_items = align.into();
         self
     }
 
@@ -239,9 +254,7 @@ where
             self.height,
             Padding::ZERO,
             self.spacing,
-            // Left-align rows: full-width leaves fill the row, while content-sized rows (e.g.
-            // submenu triggers) align to the start instead of being centered.
-            Alignment::Start,
+            self.align_items,
             &mut self
                 .items
                 .iter_mut()
@@ -785,6 +798,24 @@ where
         renderer.with_layer(items_bounds, |r| {
             itl_iter_slice!(slice, self.items;iter, tree.children;iter, slice_layout.children())
                 .for_each(|((item, tree), layout)| {
+                    if item.separator {
+                        // The divider element is transparent; paint the hairline here so it tracks
+                        // the resolved `Style::separator` (and any `MenuBar::style` override).
+                        let b = layout.bounds();
+                        let line = Rectangle {
+                            x: b.x + SEPARATOR_INSET_X,
+                            y: b.y + (b.height - 1.0) / 2.0,
+                            width: (b.width - 2.0 * SEPARATOR_INSET_X).max(0.0),
+                            height: 1.0,
+                        };
+                        r.fill_quad(
+                            renderer::Quad {
+                                bounds: line,
+                                ..Default::default()
+                            },
+                            theme_style.separator,
+                        );
+                    }
                     item.draw(tree, r, theme, style, layout, cursor, viewport);
                 });
         });
@@ -804,6 +835,9 @@ where
     /// Whether keyboard navigation can land on this entry. `false` for inert rows such as
     /// [`separator`]s and disabled actions, which are skipped by arrow-key movement.
     pub(crate) navigable: bool,
+    /// Whether this entry is a [`separator`], drawn by the menu as a hairline in
+    /// [`Style::separator`] so it honors the bar's resolved style.
+    pub(crate) separator: bool,
 }
 impl<'a, Message, Theme, Renderer> Item<'a, Message, Theme, Renderer>
 where
@@ -817,6 +851,7 @@ where
             menu: None,
             close_on_click: None,
             navigable: true,
+            separator: false,
         }
     }
 
@@ -830,6 +865,7 @@ where
             menu: Some(Box::new(menu)),
             close_on_click: None,
             navigable: true,
+            separator: false,
         }
     }
 
@@ -967,30 +1003,31 @@ where
     }
 }
 
+/// Horizontal inset (per side) of the hairline drawn for a [`separator`].
+const SEPARATOR_INSET_X: f32 = 6.0;
+/// Vertical padding (per side) around the hairline drawn for a [`separator`].
+const SEPARATOR_INSET_Y: f32 = 4.0;
+
 /// A thin horizontal divider [`Item`] for separating groups of entries in a [`Menu`].
 ///
-/// It is inert (carries no message) and adapts to the active [`iced::Theme`], matching the
-/// crate's baseline flyout styling from [`primary`](crate::primary).
+/// It is inert (carries no message); the menu paints the hairline in [`Style::separator`], so it
+/// follows the bar's resolved style — including a custom [`MenuBar::style`](crate::MenuBar::style).
 pub fn separator<'a, Message>() -> Item<'a, Message, iced::Theme, iced::Renderer>
 where
     Message: 'a,
 {
-    use iced::widget::{container, text};
+    use iced::widget::{Space, container};
 
-    let line = container(text(""))
+    // The element only reserves the row's height (hairline + vertical padding); the colored line
+    // itself is drawn by `Menu::draw` using the resolved `Style::separator`.
+    let line = container(Space::new())
         .width(Length::Fill)
-        .height(1)
-        .style(|theme: &iced::Theme| {
-            let palette = theme.extended_palette();
-            container::Style {
-                background: Some(palette.background.strong.color.into()),
-                ..container::Style::default()
-            }
-        });
+        .height(1.0 + 2.0 * SEPARATOR_INSET_Y);
 
-    let mut item = Item::new(container(line).padding([4, 6]));
+    let mut item = Item::new(container(line).padding([0.0, SEPARATOR_INSET_X]));
     // Inert divider: keyboard navigation skips over it.
     item.navigable = false;
+    item.separator = true;
     item
 }
 
@@ -1016,9 +1053,12 @@ where
             label.into_fragment(),
             None,
             None,
+            None,
+            HOTKEY_ALPHA,
             on_press,
             true,
             Box::new(menu_item_style),
+            RowLayout::menu_row(),
         )
     }
 
@@ -1040,8 +1080,15 @@ where
             on_press,
             icon: None,
             hotkey: None,
+            hotkey_color: None,
+            hotkey_alpha: None,
             disabled: false,
+            disabled_alpha: None,
             style: None,
+            icon_size: None,
+            icon_slot_width: None,
+            padding: None,
+            content_spacing: None,
         }
     }
 
@@ -1061,6 +1108,12 @@ where
             menu,
             icon: None,
             style: None,
+            icon_size: None,
+            icon_slot_width: None,
+            padding: None,
+            content_spacing: None,
+            chevron_color: None,
+            chevron_size: None,
         }
     }
 
@@ -1079,6 +1132,7 @@ where
             label: label.into_fragment(),
             menu,
             style: None,
+            padding: None,
         }
     }
 
@@ -1089,18 +1143,24 @@ where
         label: iced::widget::text::Fragment<'a>,
         icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
         hotkey: Option<iced::widget::text::Fragment<'a>>,
+        hotkey_color: Option<Color>,
+        hotkey_alpha: f32,
         on_press: Message,
         enabled: bool,
         style: ButtonStyleFn<'a>,
+        layout: RowLayout,
     ) -> Self {
         use iced::alignment::Vertical;
         use iced::widget::{button, row, text};
 
-        let mut content = row![icon_slot(icon), text(label).width(Length::Fill)]
-            .align_y(Vertical::Center)
-            .spacing(8);
+        let mut content = row![
+            icon_slot(icon, layout.icon_slot_width, layout.icon_size),
+            text(label).width(Length::Fill)
+        ]
+        .align_y(Vertical::Center)
+        .spacing(layout.spacing);
         if let Some(hotkey) = hotkey {
-            content = content.push(hotkey_label(hotkey));
+            content = content.push(hotkey_label(hotkey, hotkey_color, hotkey_alpha));
         }
 
         // A disabled row publishes no message (`on_press_maybe(None)`).
@@ -1109,7 +1169,7 @@ where
         let mut item = Self::new(
             button(content)
                 .width(Length::Fill)
-                .padding([5, 12])
+                .padding(layout.padding)
                 .style(style)
                 .on_press_maybe(on_press),
         );
@@ -1133,18 +1193,25 @@ where
         icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
         menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
         style: ButtonStyleFn<'a>,
+        layout: RowLayout,
+        chevron_color: Option<Color>,
+        chevron_size: f32,
     ) -> Self {
         use iced::alignment::Vertical;
         use iced::widget::{button, row, text};
 
         Self::with_menu(
             button(
-                row![icon_slot(icon), text(label).width(Length::Fill), submenu_chevron()]
-                    .align_y(Vertical::Center)
-                    .spacing(8),
+                row![
+                    icon_slot(icon, layout.icon_slot_width, layout.icon_size),
+                    text(label).width(Length::Fill),
+                    submenu_chevron(chevron_color, chevron_size)
+                ]
+                .align_y(Vertical::Center)
+                .spacing(layout.spacing),
             )
             .width(Length::Fill)
-            .padding([5, 12])
+            .padding(layout.padding)
             .style(style)
             .on_press_maybe(None),
             menu,
@@ -1157,11 +1224,12 @@ where
         label: iced::widget::text::Fragment<'a>,
         menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
         style: ButtonStyleFn<'a>,
+        padding: Padding,
     ) -> Self {
         use iced::widget::{button, text};
 
         Self::with_menu(
-            button(text(label)).padding([5, 10]).style(style).on_press_maybe(None),
+            button(text(label)).padding(padding).style(style).on_press_maybe(None),
             menu,
         )
     }
@@ -1188,8 +1256,15 @@ pub struct ActionBuilder<'a, Message> {
     on_press: Message,
     icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
     hotkey: Option<iced::widget::text::Fragment<'a>>,
+    hotkey_color: Option<Color>,
+    hotkey_alpha: Option<f32>,
     disabled: bool,
+    disabled_alpha: Option<f32>,
     style: Option<ButtonStyleFn<'a>>,
+    icon_size: Option<f32>,
+    icon_slot_width: Option<f32>,
+    padding: Option<Padding>,
+    content_spacing: Option<f32>,
 }
 
 impl<'a, Message> ActionBuilder<'a, Message>
@@ -1214,12 +1289,58 @@ where
         self
     }
 
+    /// Overrides the hotkey hint's color outright (default: the theme's resting text color,
+    /// dimmed by [`hotkey_alpha`](Self::hotkey_alpha)).
+    pub fn hotkey_color(mut self, color: impl Into<Color>) -> Self {
+        self.hotkey_color = Some(color.into());
+        self
+    }
+
+    /// Sets the opacity applied to the theme-derived hotkey hint color (default `0.6`). Ignored
+    /// when [`hotkey_color`](Self::hotkey_color) sets an explicit color.
+    pub fn hotkey_alpha(mut self, alpha: f32) -> Self {
+        self.hotkey_alpha = Some(alpha);
+        self
+    }
+
     /// Marks the action as disabled: it renders greyed out (via [`menu_item_disabled_style`]),
     /// publishes no message when clicked, and does not dismiss the menu.
     ///
     /// A custom [`style`](Self::style) still wins if you set one.
     pub fn disabled(mut self) -> Self {
         self.disabled = true;
+        self
+    }
+
+    /// Sets the text opacity used when [`disabled`](Self::disabled) (default `0.4`). Ignored when
+    /// a custom [`style`](Self::style) is set.
+    pub fn disabled_alpha(mut self, alpha: f32) -> Self {
+        self.disabled_alpha = Some(alpha);
+        self
+    }
+
+    /// Sets the size of the (square) icon box reserved on the left of the row (default `16`).
+    pub fn icon_size(mut self, size: f32) -> Self {
+        self.icon_size = Some(size);
+        self
+    }
+
+    /// Sets the width of the reserved icon column (default `20`). Keep it consistent across a
+    /// menu's rows so labels line up.
+    pub fn icon_slot_width(mut self, width: f32) -> Self {
+        self.icon_slot_width = Some(width);
+        self
+    }
+
+    /// Sets the row button's padding (default `[5, 12]`).
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.padding = Some(padding.into());
+        self
+    }
+
+    /// Sets the spacing between the icon column, label, and hotkey hint (default `8`).
+    pub fn content_spacing(mut self, spacing: f32) -> Self {
+        self.content_spacing = Some(spacing);
         self
     }
 
@@ -1235,20 +1356,33 @@ where
 
     /// Finishes building, producing the action [`Item`].
     pub fn build(self) -> Item<'a, Message, iced::Theme, iced::Renderer> {
+        let disabled_alpha = self.disabled_alpha.unwrap_or(DISABLED_ALPHA);
+        let disabled = self.disabled;
         let style = self.style.unwrap_or_else(|| {
-            if self.disabled {
-                Box::new(menu_item_disabled_style)
+            if disabled {
+                Box::new(move |theme: &iced::Theme, status| {
+                    menu_item_disabled_style_with(theme, status, disabled_alpha)
+                })
             } else {
                 Box::new(menu_item_style)
             }
         });
+        let layout = RowLayout {
+            icon_size: self.icon_size.unwrap_or(ICON_SIZE),
+            icon_slot_width: self.icon_slot_width.unwrap_or(ICON_SLOT_WIDTH),
+            padding: self.padding.unwrap_or_else(|| [5.0, 12.0].into()),
+            spacing: self.content_spacing.unwrap_or(ROW_SPACING),
+        };
         Item::leaf_core(
             self.label,
             self.icon,
             self.hotkey,
+            self.hotkey_color,
+            self.hotkey_alpha.unwrap_or(HOTKEY_ALPHA),
             self.on_press,
             !self.disabled,
             style,
+            layout,
         )
     }
 }
@@ -1273,6 +1407,12 @@ pub struct SubmenuBuilder<'a, Message> {
     menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
     icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
     style: Option<ButtonStyleFn<'a>>,
+    icon_size: Option<f32>,
+    icon_slot_width: Option<f32>,
+    padding: Option<Padding>,
+    content_spacing: Option<f32>,
+    chevron_color: Option<Color>,
+    chevron_size: Option<f32>,
 }
 
 impl<'a, Message> SubmenuBuilder<'a, Message>
@@ -1289,6 +1429,43 @@ where
         self
     }
 
+    /// Sets the size of the (square) icon box reserved on the left of the row (default `16`).
+    pub fn icon_size(mut self, size: f32) -> Self {
+        self.icon_size = Some(size);
+        self
+    }
+
+    /// Sets the width of the reserved icon column (default `20`). Keep it consistent across a
+    /// menu's rows so labels line up.
+    pub fn icon_slot_width(mut self, width: f32) -> Self {
+        self.icon_slot_width = Some(width);
+        self
+    }
+
+    /// Sets the row button's padding (default `[5, 12]`).
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.padding = Some(padding.into());
+        self
+    }
+
+    /// Sets the spacing between the icon column, label, and trailing chevron (default `8`).
+    pub fn content_spacing(mut self, spacing: f32) -> Self {
+        self.content_spacing = Some(spacing);
+        self
+    }
+
+    /// Overrides the trailing chevron's color (default: the theme's resting text color).
+    pub fn chevron_color(mut self, color: impl Into<Color>) -> Self {
+        self.chevron_color = Some(color.into());
+        self
+    }
+
+    /// Sets the trailing chevron's size (default `14`).
+    pub fn chevron_size(mut self, size: f32) -> Self {
+        self.chevron_size = Some(size);
+        self
+    }
+
     /// Swaps in a custom [`button`] style, replacing the crate's default [`menu_item_style`].
     pub fn style(
         mut self,
@@ -1302,7 +1479,21 @@ where
     /// Finishes building, producing the submenu [`Item`].
     pub fn build(self) -> Item<'a, Message, iced::Theme, iced::Renderer> {
         let style = self.style.unwrap_or_else(|| Box::new(menu_item_style));
-        Item::submenu_core(self.label, self.icon, self.menu, style)
+        let layout = RowLayout {
+            icon_size: self.icon_size.unwrap_or(ICON_SIZE),
+            icon_slot_width: self.icon_slot_width.unwrap_or(ICON_SLOT_WIDTH),
+            padding: self.padding.unwrap_or_else(|| [5.0, 12.0].into()),
+            spacing: self.content_spacing.unwrap_or(ROW_SPACING),
+        };
+        Item::submenu_core(
+            self.label,
+            self.icon,
+            self.menu,
+            style,
+            layout,
+            self.chevron_color,
+            self.chevron_size.unwrap_or(CHEVRON_SIZE),
+        )
     }
 }
 
@@ -1326,12 +1517,19 @@ pub struct RootBuilder<'a, Message> {
     label: iced::widget::text::Fragment<'a>,
     menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
     style: Option<ButtonStyleFn<'a>>,
+    padding: Option<Padding>,
 }
 
 impl<'a, Message> RootBuilder<'a, Message>
 where
     Message: Clone + 'a,
 {
+    /// Sets the root button's padding (default `[5, 10]`).
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.padding = Some(padding.into());
+        self
+    }
+
     /// Swaps in a custom [`button`] style, replacing the crate's default [`menu_item_style`].
     pub fn style(
         mut self,
@@ -1345,7 +1543,12 @@ where
     /// Finishes building, producing the root [`Item`].
     pub fn build(self) -> Item<'a, Message, iced::Theme, iced::Renderer> {
         let style = self.style.unwrap_or_else(|| Box::new(menu_item_style));
-        Item::root_core(self.label, self.menu, style)
+        Item::root_core(
+            self.label,
+            self.menu,
+            style,
+            self.padding.unwrap_or_else(|| [5.0, 10.0].into()),
+        )
     }
 }
 
@@ -1358,10 +1561,38 @@ where
     }
 }
 
-/// Recommended icon box size; the documented target for caller-supplied leaf/submenu icons.
+/// Default icon box size; the documented target for caller-supplied leaf/submenu icons.
 const ICON_SIZE: f32 = 16.0;
-/// Fixed width of the reserved icon column. Identical for icon and icon-less rows so labels align.
+/// Default width of the reserved icon column. Identical for icon and icon-less rows so labels align.
 const ICON_SLOT_WIDTH: f32 = 20.0;
+/// Default spacing between the icon column, label, and trailing hotkey/chevron on a row.
+const ROW_SPACING: f32 = 8.0;
+/// Default trailing submenu-chevron size.
+const CHEVRON_SIZE: f32 = 14.0;
+
+/// Per-row layout knobs shared by the leaf/action and submenu builders.
+#[derive(Debug, Clone, Copy)]
+struct RowLayout {
+    /// Size of the (square) icon box reserved on the left of the row.
+    icon_size: f32,
+    /// Width of the reserved icon column (kept identical across rows so labels line up).
+    icon_slot_width: f32,
+    /// Padding applied to the row button.
+    padding: Padding,
+    /// Spacing between the icon column, label, and trailing hotkey/chevron.
+    spacing: f32,
+}
+impl RowLayout {
+    /// Defaults for in-menu (leaf/action/submenu) rows.
+    fn menu_row() -> Self {
+        Self {
+            icon_size: ICON_SIZE,
+            icon_slot_width: ICON_SLOT_WIDTH,
+            padding: [5.0, 12.0].into(),
+            spacing: ROW_SPACING,
+        }
+    }
+}
 
 /// The fixed-width left column reserved on every leaf/submenu row.
 ///
@@ -1369,14 +1600,16 @@ const ICON_SLOT_WIDTH: f32 = 20.0;
 /// an empty spacer — so labels line up across a menu mixing icon and icon-less entries.
 fn icon_slot<'a, Message: 'a>(
     content: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
+    slot_width: f32,
+    icon_size: f32,
 ) -> Element<'a, Message, iced::Theme, iced::Renderer> {
     use iced::alignment::{Horizontal, Vertical};
     use iced::widget::{Space, container};
 
     let inner = content.unwrap_or_else(|| Space::new().into());
     container(inner)
-        .width(Length::Fixed(ICON_SLOT_WIDTH))
-        .height(Length::Fixed(ICON_SIZE))
+        .width(Length::Fixed(slot_width))
+        .height(Length::Fixed(icon_size))
         .align_x(Horizontal::Center)
         .align_y(Vertical::Center)
         .into()
@@ -1389,36 +1622,43 @@ const HOTKEY_ALPHA: f32 = 0.6;
 /// A dimmed keyboard-shortcut hint shown on the right of an action row.
 ///
 /// Like [`submenu_chevron`], its color is not hover-aware — it stays a faded variant of the menu
-/// label's resting text color (see [`menu_item_style`]) across all states.
+/// label's resting text color (see [`menu_item_style`]) across all states. `color` overrides the
+/// hue outright; otherwise `alpha` dims the theme's resting text color.
 fn hotkey_label<'a, Message: 'a>(
     hotkey: iced::widget::text::Fragment<'a>,
+    color: Option<Color>,
+    alpha: f32,
 ) -> Element<'a, Message, iced::Theme, iced::Renderer> {
     use iced::widget::text;
 
     text(hotkey)
-        .style(|theme: &iced::Theme| text::Style {
-            color: Some(iced::Color {
-                a: HOTKEY_ALPHA,
+        .style(move |theme: &iced::Theme| text::Style {
+            color: Some(color.unwrap_or(Color {
+                a: alpha,
                 ..theme.extended_palette().background.base.text
-            }),
+            })),
         })
         .into()
 }
 
 /// The trailing arrow drawn on submenu rows to signal they open a nested flyout.
 ///
-/// Colored to match the menu label's resting text color (see [`menu_item_style`]).
-fn submenu_chevron<'a, Message: 'a>() -> Element<'a, Message, iced::Theme, iced::Renderer> {
+/// Colored to match the menu label's resting text color (see [`menu_item_style`]) unless `color`
+/// overrides it.
+fn submenu_chevron<'a, Message: 'a>(
+    color: Option<Color>,
+    size: f32,
+) -> Element<'a, Message, iced::Theme, iced::Renderer> {
     use iced::widget::svg;
 
     let handle =
         svg::Handle::from_memory(include_bytes!("../svg/arrow-next-small-svgrepo-com.svg").as_slice());
 
     svg(handle)
-        .width(14)
-        .height(14)
-        .style(|theme: &iced::Theme, _status| svg::Style {
-            color: Some(theme.extended_palette().background.base.text),
+        .width(size)
+        .height(size)
+        .style(move |theme: &iced::Theme, _status| svg::Style {
+            color: Some(color.unwrap_or(theme.extended_palette().background.base.text)),
         })
         .into()
 }

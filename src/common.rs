@@ -197,6 +197,7 @@ pub(crate) struct GlobalParameters<'a, Theme: Catalog> {
     pub(crate) scroll_speed: ScrollSpeed,
     pub(crate) close_on_item_click: bool,
     pub(crate) close_on_background_click: bool,
+    pub(crate) open_on_hover: bool,
     pub(crate) class: Theme::Class<'a>,
 }
 

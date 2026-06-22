@@ -38,5 +38,6 @@ pub use common::{Dismiss, PathHighlight, ScrollSpeed};
 pub use menu::{ActionBuilder, Item, Menu, RootBuilder, SubmenuBuilder, separator};
 pub use menu_bar::MenuBar;
 pub use style::{
-    Catalog, Style, StyleFn, default_style, menu_item_disabled_style, menu_item_style,
+    Catalog, DISABLED_ALPHA, Style, StyleFn, default_style, menu_item_disabled_style,
+    menu_item_disabled_style_with, menu_item_style,
 };

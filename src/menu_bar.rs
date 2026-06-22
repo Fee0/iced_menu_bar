@@ -118,6 +118,7 @@ where
     padding: Padding,
     width: Length,
     height: Length,
+    align_items: Alignment,
     pub(crate) global_parameters: GlobalParameters<'a, Theme>,
 }
 impl<'a, Message, Theme, Renderer> MenuBar<'a, Message, Theme, Renderer>
@@ -144,6 +145,7 @@ where
             },
             width: Length::Shrink,
             height: Length::Shrink,
+            align_items: Alignment::Center,
             global_parameters: GlobalParameters {
                 safe_bounds_margin: 40.0,
                 // `Fill` draws a backdrop behind the active path regardless of widget state. The
@@ -156,6 +158,7 @@ where
                 },
                 close_on_item_click: true,
                 close_on_background_click: false,
+                open_on_hover: false,
                 class: Theme::default(),
             },
         }
@@ -218,6 +221,21 @@ where
     /// governs clicks inside an open menu but between its entries.
     pub fn close_on_background_click(mut self, close: bool) -> Self {
         self.global_parameters.close_on_background_click = close;
+        self
+    }
+
+    /// Opens the menu tree on hover instead of requiring an initial click. Off by default.
+    ///
+    /// Once a menu is open, moving the cursor across root entries already switches between them
+    /// regardless of this setting; this only governs the *first* open.
+    pub fn open_on_hover(mut self, open_on_hover: bool) -> Self {
+        self.global_parameters.open_on_hover = open_on_hover;
+        self
+    }
+
+    /// Sets the vertical alignment of the bar's root items (defaults to [`Alignment::Center`]).
+    pub fn align_items(mut self, align: impl Into<Alignment>) -> Self {
+        self.align_items = align.into();
         self
     }
 
@@ -296,7 +314,7 @@ where
             self.height,
             self.padding,
             self.spacing,
-            Alignment::Center,
+            self.align_items,
             &mut self
                 .roots
                 .iter_mut()
@@ -473,6 +491,18 @@ where
                 } else {
                     bar.close(item_trees, shell);
                 }
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. })
+                if self.global_parameters.open_on_hover && cursor.is_over(bar_bounds) =>
+            {
+                bar.open(
+                    &mut self.roots,
+                    item_trees,
+                    slice_layout.children(),
+                    cursor,
+                    shell,
+                );
+                shell.capture_event();
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta })
                 if cursor.is_over(bar_bounds)
