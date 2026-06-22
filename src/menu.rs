@@ -65,8 +65,6 @@ pub(crate) struct MenuState {
     pub(crate) slice: MenuSlice,
     pub(crate) safe_triangle: Option<SafeTriangle>,
     pub(crate) last_cursor_on_parent: Option<Point>,
-    /// The hovered item index and laid-out node of its tooltip, if any.
-    pub(crate) tooltip: Option<(usize, Node)>,
 }
 impl MenuState {
     /// item_tree: Tree{item state, [Tree{widget state}, Tree{menu state, [...]}]}
@@ -105,7 +103,6 @@ impl Default for MenuState {
             },
             safe_triangle: None,
             last_cursor_on_parent: None,
-            tooltip: None,
         }
     }
 }
@@ -448,57 +445,6 @@ where
             menu_state.safe_triangle = Some(triangle);
         }
 
-        // Tooltip hover tracking: find the hovered item that carries a tooltip and lay it
-        // out so it can be drawn on top of the menu in `draw`.
-        {
-            let hovered = {
-                let Tree {
-                    state, children, ..
-                } = &*tree;
-                let menu_state = state.downcast_ref::<MenuState>();
-                let slice = menu_state.slice;
-                let mut hovered = None;
-                for (i, ((item, _t), l)) in itl_iter_slice_enum!(
-                    slice,
-                    self.items;iter,
-                    children;iter,
-                    slice_layout.children()
-                ) {
-                    if cursor.is_over(l.bounds()) {
-                        if item.tooltip.is_some() {
-                            hovered = Some((i, l.bounds()));
-                        }
-                        break;
-                    }
-                }
-                hovered
-            };
-
-            let computed = hovered.and_then(|(i, row_bounds)| {
-                let item = &mut self.items[i];
-                item.tooltip.as_mut().map(|tooltip| {
-                    let mut tooltip_tree = Tree::new(&*tooltip);
-                    let node = tooltip.as_widget_mut().layout(
-                        &mut tooltip_tree,
-                        renderer,
-                        &Limits::new(Size::ZERO, viewport.size()),
-                    );
-                    let size = node.size();
-                    let mut x = row_bounds.x + 8.0;
-                    let mut y = row_bounds.y + row_bounds.height + 4.0;
-                    if x + size.width > viewport.x + viewport.width {
-                        x = (viewport.x + viewport.width - size.width).max(viewport.x);
-                    }
-                    if y + size.height > viewport.y + viewport.height {
-                        y = (row_bounds.y - size.height - 4.0).max(viewport.y);
-                    }
-                    (i, node.move_to(Point::new(x, y)))
-                })
-            });
-
-            tree.state.downcast_mut::<MenuState>().tooltip = computed;
-        }
-
         enum Op {
             UpdateItems,
             OpenEvent,
@@ -835,41 +781,6 @@ where
                     item.draw(tree, r, theme, style, layout, cursor, viewport);
                 });
         });
-
-        // Draw the hovered item's tooltip on top of everything else.
-        if let Some((idx, node)) = menu_state.tooltip.as_ref()
-            && let Some(tooltip) = self.items.get(*idx).and_then(|item| item.tooltip.as_ref())
-        {
-            let tooltip_tree = Tree::new(tooltip);
-            let tooltip_layout = Layout::new(node);
-            let content_bounds = tooltip_layout.bounds();
-            let background = Rectangle {
-                x: content_bounds.x - 6.0,
-                y: content_bounds.y - 4.0,
-                width: content_bounds.width + 12.0,
-                height: content_bounds.height + 8.0,
-            };
-            renderer.with_layer(*viewport, |r| {
-                r.fill_quad(
-                    renderer::Quad {
-                        bounds: background,
-                        border: theme_style.menu_border,
-                        shadow: theme_style.menu_shadow,
-                        ..Default::default()
-                    },
-                    theme_style.menu_background,
-                );
-                tooltip.as_widget().draw(
-                    &tooltip_tree,
-                    r,
-                    theme,
-                    style,
-                    tooltip_layout,
-                    mouse::Cursor::Unavailable,
-                    viewport,
-                );
-            });
-        }
     }
 }
 
@@ -882,7 +793,6 @@ where
 {
     pub(crate) item: Element<'a, Message, Theme, Renderer>,
     pub(crate) menu: Option<Box<Menu<'a, Message, Theme, Renderer>>>,
-    pub(crate) tooltip: Option<Element<'a, Message, Theme, Renderer>>,
     pub(crate) close_on_click: Option<bool>,
 }
 impl<'a, Message, Theme, Renderer> Item<'a, Message, Theme, Renderer>
@@ -895,7 +805,6 @@ where
         Self {
             item: item.into(),
             menu: None,
-            tooltip: None,
             close_on_click: None,
         }
     }
@@ -908,15 +817,8 @@ where
         Self {
             item: item.into(),
             menu: Some(Box::new(menu)),
-            tooltip: None,
             close_on_click: None,
         }
-    }
-
-    /// Sets a tooltip element shown while this item is hovered.
-    pub fn tooltip(mut self, tooltip: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
-        self.tooltip = Some(tooltip.into());
-        self
     }
 
     /// Sets the close on click option of the [`Item`].
@@ -1166,18 +1068,6 @@ where
                 .on_press(on_press),
             menu,
         )
-    }
-}
-
-impl<'a, Message: 'a> Item<'a, Message, iced::Theme, iced::Renderer> {
-    /// Sets a text tooltip shown while this item is hovered.
-    ///
-    /// Convenience over [`tooltip`](Self::tooltip) that wraps `content` in a small padded body;
-    /// the crate draws the tooltip background/border itself using the menu colors.
-    pub fn tooltip_text(self, content: impl iced::widget::text::IntoFragment<'a>) -> Self {
-        use iced::widget::{container, text};
-
-        self.tooltip(container(text(content).size(13)).padding([4, 8]))
     }
 }
 

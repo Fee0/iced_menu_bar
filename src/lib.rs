@@ -7,8 +7,7 @@
 //!
 //! Items are **element based** — every [`Item`] wraps an arbitrary [`Element`](iced::Element)
 //! (typically a styled button containing a row of text, an icon, and an accelerator hint), so
-//! the bar composes with the rest of an iced application without a bespoke data model. Items
-//! may additionally carry a [tooltip](Item::tooltip) shown while hovered.
+//! the bar composes with the rest of an iced application without a bespoke data model.
 //!
 //! The widget is generic over the theme: any `Theme` that implements [`Catalog`] can be used.
 //! A convenience implementation is provided for the built-in [`iced::Theme`].
@@ -22,7 +21,7 @@
 //!         Message::OpenMenu,
 //!         Menu::new(vec![
 //!             Item::leaf("New", Message::New),
-//!             Item::leaf("Open", Message::Open).tooltip_text("Open a file"),
+//!             Item::leaf("Open", Message::Open),
 //!         ]),
 //!     ),
 //! ]);

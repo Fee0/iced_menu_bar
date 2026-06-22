@@ -6,7 +6,6 @@
 //! - a [`MenuBar`] with several root items,
 //! - the built-in [`Item::root`] / [`Item::leaf`] / [`Item::submenu`] constructors and [`separator`],
 //! - nested submenus,
-//! - per-item text tooltips via [`Item::tooltip_text`],
 //! - [`Item::close_on_click`] overrides,
 //! - the fallible [`Menu::try_new`] constructor returning [`iced_menu_bar::Result`],
 //! - and the crate's built-in default styling (no custom `.style(..)` needed).
@@ -66,7 +65,7 @@ impl App {
 
 /// Builds the menu bar, exercising most of the builder surface.
 fn menu_bar() -> Element<'static, Message> {
-    // Leaves, roots, submenu entries and tooltips all come from the crate now — no hand-built
+    // Leaves, roots and submenu entries all come from the crate now — no hand-built
     // buttons. `Item::root` is the content-sized top-level bar button; `Item::submenu` is a
     // full-width in-menu entry that opens a nested flyout; the `*_styled` variants would let us
     // swap in a custom button style per item.
@@ -75,7 +74,7 @@ fn menu_bar() -> Element<'static, Message> {
         Message::OpenMenu,
         Menu::new(vec![
             leaf("New"),
-            leaf("Open").tooltip_text("Open an existing file"),
+            leaf("Open"),
             separator(),
             Item::submenu(
                 "Open Recent",
@@ -94,7 +93,7 @@ fn menu_bar() -> Element<'static, Message> {
             leaf("Cut"),
             // Keep the menu open after clicking "Copy".
             leaf("Copy").close_on_click(false),
-            leaf("Paste").tooltip_text("Insert clipboard contents"),
+            leaf("Paste"),
         ]),
     );
 
