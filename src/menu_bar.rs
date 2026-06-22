@@ -152,7 +152,7 @@ where
                 path_highlight: PathHighlight::Fill,
                 close_on_item_click: true,
                 close_on_background_click: false,
-                open_on_hover: true,
+                open_on_hover: false,
                 class: Theme::default(),
             },
         }
