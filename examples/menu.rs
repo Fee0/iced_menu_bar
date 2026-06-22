@@ -113,7 +113,7 @@ fn menu_bar() -> Element<'static, Message> {
 
     MenuBar::new(vec![file, edit, help])
         .width(Fill)
-        .open_on_hover(false)
+        .open_on_hover(true)
         .into()
 }
 

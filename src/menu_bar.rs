@@ -486,6 +486,11 @@ where
                 );
                 shell.capture_event();
             }
+            // Request a redraw so the hover highlight updates even when the menu is closed and
+            // open_on_hover is off (iced skips re-rendering if no widget captures the event).
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if !global_state.open => {
+                shell.request_redraw();
+            }
             Event::Mouse(mouse::Event::WheelScrolled { delta })
                 if cursor.is_over(bar_bounds)
                     && slice_layout.bounds().width > layout.bounds().width =>
@@ -593,29 +598,31 @@ where
             styling.bar_background,
         );
 
-        if let (PathHighlight::Fill, true, Some(active)) = (
-            &self.global_parameters.path_highlight,
-            global_state.open,
-            bar_menu_state.active,
-        ) {
-            let active_in_slice = active - slice.start_index;
-            let active_bounds = slice_layout
-                .children()
-                .nth(active_in_slice)
-                .expect(
-                    "Index (in slice space) is not within the menu bar layout. \
-                    This should not happen, please report this issue",
-                )
-                .bounds();
+        if matches!(&self.global_parameters.path_highlight, PathHighlight::Fill) {
+            // When open, highlight the active (open) root. Otherwise highlight whichever root
+            // the cursor is over so there's a visible hover response even before clicking.
+            let highlight_bounds = if global_state.open {
+                bar_menu_state.active.and_then(|active| {
+                    let active_in_slice = active - slice.start_index;
+                    slice_layout.children().nth(active_in_slice).map(|l| l.bounds())
+                })
+            } else {
+                slice_layout
+                    .children()
+                    .find(|l| cursor.is_over(l.bounds()))
+                    .map(|l| l.bounds())
+            };
 
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: active_bounds,
-                    border: styling.path_border,
-                    ..Default::default()
-                },
-                styling.path,
-            );
+            if let Some(bounds) = highlight_bounds {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds,
+                        border: styling.path_border,
+                        ..Default::default()
+                    },
+                    styling.path,
+                );
+            }
         }
 
         renderer.with_layer(
