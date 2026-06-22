@@ -27,6 +27,10 @@ pub(crate) enum MenuBarTask {
 pub(crate) struct GlobalState {
     pub(crate) open: bool,
     pub(crate) pressed: bool,
+    /// While `true`, the menu tree is being driven by the keyboard and ignores cursor-based
+    /// closing (a keyboard-opened submenu must not be torn down just because the cursor is not
+    /// over it). Reset as soon as the mouse moves.
+    pub(crate) keyboard_nav: bool,
     task: Option<MenuBarTask>,
 }
 impl GlobalState {
@@ -92,6 +96,7 @@ impl MenuBarState {
         self.global_state.pressed = false;
         self.global_state.clear_task();
         self.global_state.open = false;
+        self.global_state.keyboard_nav = false;
         self.menu_state.active = None;
         shell.request_redraw();
     }
@@ -99,10 +104,11 @@ impl MenuBarState {
 
 /// A horizontal menu bar.
 ///
-/// Construct it from a list of root [`Item`]s; each root item is typically built with
-/// [`Item::with_menu`] to attach a dropdown [`Menu`].
+/// Construct it from a list of root [`Item`]s; on the built-in [`iced::Theme`] each root is
+/// typically built with [`Item::root`] to attach a dropdown [`Menu`] (or [`Item::with_menu`] for a
+/// hand-assembled element on a custom theme).
 #[must_use]
-pub struct MenuBar<'a, Message, Theme, Renderer>
+pub struct MenuBar<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Theme: Catalog,
     Renderer: renderer::Renderer,
@@ -205,6 +211,16 @@ where
         self
     }
 
+    /// Also dismisses the menu tree when a click lands on a menu's own background (the padding
+    /// around the entries) rather than on an entry. Off by default.
+    ///
+    /// A click fully outside the menus always dismisses them regardless of this setting; this only
+    /// governs clicks inside an open menu but between its entries.
+    pub fn close_on_background_click(mut self, close: bool) -> Self {
+        self.global_parameters.close_on_background_click = close;
+        self
+    }
+
     /// Sets the padding of the [`MenuBar`].
     pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
         self.padding = padding.into();
@@ -212,7 +228,7 @@ where
     }
 
     /// Sets the style of the [`MenuBar`].
-    pub fn style(mut self, style: impl Fn(&Theme, Status) -> Style + 'a) -> Self
+    pub fn style(mut self, style: impl Fn(&Theme) -> Style + 'a) -> Self
     where
         Theme::Class<'a>: From<StyleFn<'a, Theme, Style>>,
     {
@@ -555,7 +571,7 @@ where
 
         let slice = bar_menu_state.slice;
 
-        let styling = theme.style(&self.global_parameters.class, Status::Active);
+        let styling = theme.style(&self.global_parameters.class);
         renderer.fill_quad(
             renderer::Quad {
                 bounds: layout.bounds(),

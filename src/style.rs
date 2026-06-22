@@ -6,25 +6,12 @@
 use iced::widget::button;
 use iced::{Background, Border, Color, Shadow, Theme, Vector};
 
-/// The status of a menu bar / menu entry, passed to the style function.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Status {
-    /// Can be pressed.
-    Active,
-    /// Can be pressed and is being hovered.
-    Hovered,
-    /// Is being pressed.
-    Pressed,
-    /// Cannot be pressed.
-    Disabled,
-    /// Is focused.
-    Focused,
-    /// Is selected.
-    Selected,
-}
-
-/// A boxed style function: maps a `Theme` and [`Status`] to a [`Style`].
-pub type StyleFn<'a, Theme, Style> = Box<dyn Fn(&Theme, Status) -> Style + 'a>;
+/// A boxed style function: maps a `Theme` to a [`Style`].
+///
+/// The bar and its menus are *chrome* with a single visual state, so the function takes only the
+/// theme. Per-entry interactive states (hover/press) are handled separately by the entries' own
+/// button styles (see [`menu_item_style`]).
+pub type StyleFn<'a, Theme, Style> = Box<dyn Fn(&Theme) -> Style + 'a>;
 
 /// The appearance of a menu bar and its menus.
 #[derive(Debug, Clone, Copy)]
@@ -88,8 +75,8 @@ pub trait Catalog {
     /// The default class produced by the [`Catalog`].
     fn default<'a>() -> Self::Class<'a>;
 
-    /// Resolves the [`Style`] of a class with the given [`Status`].
-    fn style(&self, class: &Self::Class<'_>, status: Status) -> Style;
+    /// Resolves the [`Style`] of a class.
+    fn style(&self, class: &Self::Class<'_>) -> Style;
 }
 
 impl Catalog for Theme {
@@ -99,8 +86,8 @@ impl Catalog for Theme {
         Box::new(default_style)
     }
 
-    fn style(&self, class: &Self::Class<'_>, status: Status) -> Style {
-        class(self, status)
+    fn style(&self, class: &Self::Class<'_>) -> Style {
+        class(self)
     }
 }
 
@@ -109,7 +96,7 @@ impl Catalog for Theme {
 /// A transparent bar over a slightly elevated flyout with a subtle hairline border and a
 /// soft drop shadow — derived from the theme palette so it adapts to light and dark themes.
 #[must_use]
-pub fn default_style(theme: &Theme, _status: Status) -> Style {
+pub fn default_style(theme: &Theme) -> Style {
     let palette = theme.extended_palette();
 
     Style {
@@ -168,5 +155,34 @@ pub fn menu_item_style(theme: &Theme, status: button::Status) -> button::Style {
             text_color: palette.primary.strong.text,
             ..base
         },
+    }
+}
+
+/// Opacity applied to a disabled entry's text, so it reads clearly greyed out.
+const DISABLED_ALPHA: f32 = 0.4;
+
+/// The styling for a disabled menu row on the built-in [`iced::Theme`].
+///
+/// Transparent and dimmed in every state — no hover or press reaction — so the row reads as
+/// non-interactive. Used by the [`action`](crate::Item::action) builder when
+/// [`disabled`](crate::ActionBuilder::disabled) is set; unlike [`menu_item_style`] it must not
+/// rely on `button::Status::Disabled` (which that style deliberately draws like `Active`).
+#[must_use]
+pub fn menu_item_disabled_style(theme: &Theme, _status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+
+    button::Style {
+        background: Some(Background::Color(Color::TRANSPARENT)),
+        text_color: Color {
+            a: DISABLED_ALPHA,
+            ..palette.background.base.text
+        },
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        shadow: Shadow::default(),
+        ..button::Style::default()
     }
 }

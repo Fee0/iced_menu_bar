@@ -18,12 +18,12 @@
 //! let menu_bar = MenuBar::new(vec![
 //!     Item::root(
 //!         "File",
-//!         Message::OpenMenu,
 //!         Menu::new(vec![
 //!             Item::leaf("New", Message::New),
 //!             Item::leaf("Open", Message::Open),
 //!         ]),
-//!     ),
+//!     )
+//!     .build(),
 //! ]);
 //! ```
 
@@ -37,4 +37,6 @@ mod style;
 pub use common::{Dismiss, PathHighlight, ScrollSpeed};
 pub use menu::{ActionBuilder, Item, Menu, RootBuilder, SubmenuBuilder, separator};
 pub use menu_bar::MenuBar;
-pub use style::{Catalog, Status, Style, StyleFn, default_style, menu_item_style};
+pub use style::{
+    Catalog, Style, StyleFn, default_style, menu_item_disabled_style, menu_item_style,
+};

@@ -11,7 +11,7 @@ use iced::advanced::layout::{Limits, Node};
 use iced::advanced::widget::{Operation, Tree};
 use iced::advanced::{Clipboard, Layout, Shell, overlay, renderer};
 use iced::time::Instant;
-use iced::{Event, Point, Rectangle, Size, Vector, mouse, window};
+use iced::{Event, Point, Rectangle, Size, Vector, keyboard, mouse, window};
 
 use crate::common::*;
 use crate::menu::*;
@@ -37,6 +37,402 @@ where
     pub(crate) fn overlay_element(self) -> overlay::Element<'b, Message, Theme, Renderer> {
         overlay::Element::new(Box::new(self))
     }
+
+    /// Handles a key press while the menu tree is open. Returns whether the key was consumed.
+    ///
+    /// Navigation operates on the deepest open menu (the keyboard focus): ↑/↓ move the highlight,
+    /// → opens the highlighted submenu (or steps to the next root at the top level), ← closes the
+    /// current submenu (or steps to the previous root), Enter/Space activates, Esc closes a level.
+    fn handle_key(
+        &mut self,
+        key: &keyboard::Key,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+    ) -> bool {
+        use keyboard::key::Named;
+
+        let keyboard::Key::Named(named) = key else {
+            return false;
+        };
+        let action = match named {
+            Named::ArrowDown => KeyAction::Down,
+            Named::ArrowUp => KeyAction::Up,
+            Named::ArrowRight => KeyAction::Right,
+            Named::ArrowLeft => KeyAction::Left,
+            Named::Enter | Named::Space => KeyAction::Activate,
+            Named::Escape => KeyAction::Escape,
+            _ => return false,
+        };
+
+        let Tree {
+            state,
+            children: item_trees,
+            ..
+        } = &mut *self.tree;
+        let bar = state.downcast_mut::<MenuBarState>();
+        if !bar.global_state.open {
+            return false;
+        }
+        let Some(active_root) = bar.menu_state.active else {
+            return false;
+        };
+
+        // Entering keyboard mode: keep the tree open regardless of cursor position until the mouse
+        // moves again (see `GlobalState::keyboard_nav`).
+        bar.global_state.keyboard_nav = true;
+
+        let viewport = layout.bounds();
+        let mut lc = layout.children();
+        let _bar_bounds = lc.next();
+        let _roots_layout = lc.next();
+        let Some(menu_layouts_layout) = lc.next() else {
+            return false;
+        };
+        let mut menu_layouts = menu_layouts_layout.children();
+
+        let close_on_item_click = self.menu_bar.global_parameters.close_on_item_click;
+
+        let outcome = {
+            let root_item = &mut self.menu_bar.roots[active_root];
+            let Some(root_menu) = root_item.menu.as_mut() else {
+                return false;
+            };
+            let root_tree = &mut item_trees[active_root];
+            if root_tree.children.len() < 2 {
+                return false;
+            }
+            let menu_tree = &mut root_tree.children[1];
+
+            apply_key(
+                action,
+                &mut root_menu.items,
+                menu_tree,
+                &mut menu_layouts,
+                true,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+                close_on_item_click,
+            )
+        };
+
+        match outcome {
+            KeyOutcome::Unhandled => false,
+            KeyOutcome::Handled => true,
+            KeyOutcome::CloseLevel | KeyOutcome::CloseAll => {
+                bar.close(item_trees, shell);
+                true
+            }
+            KeyOutcome::SwitchRoot(delta) => {
+                let slice = bar.menu_state.slice;
+                let n = self.menu_bar.roots.len();
+                if n == 0 {
+                    return true;
+                }
+                let lo = slice.start_index.min(n - 1);
+                let hi = slice.end_index.min(n - 1);
+                let span = hi - lo + 1;
+
+                // Prune the current root's menu subtree before opening the next one.
+                if let Some(t) = item_trees.get_mut(active_root)
+                    && t.children.len() == 2
+                {
+                    let _ = t.children.pop();
+                }
+                bar.menu_state.active = None;
+
+                // Step to the next root (within the visible slice) that actually has a menu.
+                let mut new = active_root;
+                for _ in 0..span {
+                    new = if delta > 0 {
+                        if new >= hi { lo } else { new + 1 }
+                    } else if new <= lo {
+                        hi
+                    } else {
+                        new - 1
+                    };
+                    if self.menu_bar.roots[new].menu.is_some() {
+                        let item = &self.menu_bar.roots[new];
+                        bar.menu_state.open_new_menu(new, item, &mut item_trees[new]);
+                        if let Some(mt) = item_trees[new].children.get_mut(1) {
+                            let first = self.menu_bar.roots[new]
+                                .menu
+                                .as_deref()
+                                .and_then(|m| first_navigable(&m.items));
+                            mt.state.downcast_mut::<MenuState>().keyboard_highlight = first;
+                        }
+                        break;
+                    }
+                }
+
+                shell.invalidate_layout();
+                shell.request_redraw();
+                true
+            }
+        }
+    }
+}
+
+/// A keyboard navigation command, resolved from a key press in
+/// [`MenuBarOverlay::handle_key`].
+#[derive(Clone, Copy)]
+enum KeyAction {
+    Down,
+    Up,
+    Left,
+    Right,
+    Activate,
+    Escape,
+}
+
+/// The result of applying a [`KeyAction`] at a menu level, bubbled up the open path.
+enum KeyOutcome {
+    /// The key was not consumed; let the rest of the widget handle it.
+    Unhandled,
+    /// The key was consumed; redraw.
+    Handled,
+    /// Close just this menu level; the parent consumes it (or the bar closes the tree at the top).
+    CloseLevel,
+    /// Close the entire menu tree (an entry was activated under a close-on-click policy).
+    CloseAll,
+    /// Move to an adjacent top-level (root) menu by the given signed step.
+    SwitchRoot(isize),
+}
+
+/// Applies a [`KeyAction`] to the menu at this level, recursing into the open child first so the
+/// deepest open menu (the keyboard focus) is the one that acts.
+#[allow(clippy::too_many_arguments)]
+fn apply_key<'a, 'b, Message, Theme: Catalog, Renderer: renderer::Renderer>(
+    action: KeyAction,
+    items: &mut [Item<'a, Message, Theme, Renderer>],
+    menu_tree: &mut Tree,
+    menu_layouts: &mut impl Iterator<Item = Layout<'b>>,
+    is_top: bool,
+    renderer: &Renderer,
+    clipboard: &mut dyn Clipboard,
+    shell: &mut Shell<'_, Message>,
+    viewport: Rectangle,
+    close_on_item_click: bool,
+) -> KeyOutcome {
+    let Some(menu_layout) = menu_layouts.next() else {
+        return KeyOutcome::Unhandled;
+    };
+    let Some(slice_layout) = menu_layout.children().next() else {
+        return KeyOutcome::Unhandled;
+    };
+
+    let Tree {
+        state,
+        children: item_trees,
+        ..
+    } = menu_tree;
+    let menu_state = state.downcast_mut::<MenuState>();
+
+    // Descend into the open child menu first; the deepest open menu owns the keyboard focus.
+    if let Some(active) = menu_state.active {
+        let outcome = {
+            let Some(child_item) = items.get_mut(active) else {
+                return KeyOutcome::Unhandled;
+            };
+            let Some(child_menu) = child_item.menu.as_mut() else {
+                return KeyOutcome::Unhandled;
+            };
+            let child_item_tree = &mut item_trees[active];
+            if child_item_tree.children.len() < 2 {
+                return KeyOutcome::Unhandled;
+            }
+            let child_menu_tree = &mut child_item_tree.children[1];
+
+            apply_key(
+                action,
+                &mut child_menu.items,
+                child_menu_tree,
+                menu_layouts,
+                false,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+                close_on_item_click,
+            )
+        };
+
+        return match outcome {
+            KeyOutcome::CloseLevel => {
+                // This level owns the child that asked to close.
+                menu_state.active = None;
+                menu_state.keyboard_highlight = Some(active);
+                if item_trees[active].children.len() == 2 {
+                    let _ = item_trees[active].children.pop();
+                }
+                shell.invalidate_layout();
+                shell.request_redraw();
+                KeyOutcome::Handled
+            }
+            other => other,
+        };
+    }
+
+    // This is the focused (deepest) menu.
+    if items.is_empty() {
+        return KeyOutcome::Unhandled;
+    }
+
+    match action {
+        KeyAction::Down => {
+            if let Some(next) = next_navigable(items, menu_state.keyboard_highlight, true) {
+                menu_state.keyboard_highlight = Some(next);
+                shell.request_redraw();
+            }
+            KeyOutcome::Handled
+        }
+        KeyAction::Up => {
+            if let Some(next) = next_navigable(items, menu_state.keyboard_highlight, false) {
+                menu_state.keyboard_highlight = Some(next);
+                shell.request_redraw();
+            }
+            KeyOutcome::Handled
+        }
+        KeyAction::Right => {
+            if let Some(i) = menu_state.keyboard_highlight
+                && items[i].menu.is_some()
+            {
+                open_child(menu_state, items, item_trees, i, shell);
+                return KeyOutcome::Handled;
+            }
+            if is_top {
+                KeyOutcome::SwitchRoot(1)
+            } else {
+                KeyOutcome::Handled
+            }
+        }
+        KeyAction::Left => {
+            if is_top {
+                KeyOutcome::SwitchRoot(-1)
+            } else {
+                KeyOutcome::CloseLevel
+            }
+        }
+        KeyAction::Escape => KeyOutcome::CloseLevel,
+        KeyAction::Activate => {
+            let Some(i) = menu_state.keyboard_highlight else {
+                return KeyOutcome::Handled;
+            };
+            if items[i].menu.is_some() {
+                open_child(menu_state, items, item_trees, i, shell);
+                return KeyOutcome::Handled;
+            }
+
+            // Synthesize a click on the focused leaf so its inner widget publishes its message.
+            let slice = menu_state.slice;
+            if i < slice.start_index || i > slice.end_index {
+                return KeyOutcome::Handled;
+            }
+            let idx_in_slice = i - slice.start_index;
+            let Some(item_layout) = slice_layout.children().nth(idx_in_slice) else {
+                return KeyOutcome::Handled;
+            };
+            let center = item_layout.bounds().center();
+            let synth_cursor = mouse::Cursor::Available(center);
+
+            let item = &mut items[i];
+            let item_tree = &mut item_trees[i];
+            for ev in [
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ] {
+                // A fresh shell per synthetic event: a button captures the shell on press, and it
+                // early-returns on any already-captured event — so feeding both press and release
+                // through one shell would make it skip the release and never publish the message.
+                let mut synth_messages = vec![];
+                let mut synth_shell = Shell::new(&mut synth_messages);
+                item.update(
+                    item_tree,
+                    &ev,
+                    item_layout,
+                    synth_cursor,
+                    renderer,
+                    clipboard,
+                    &mut synth_shell,
+                    &viewport,
+                );
+                shell.merge(synth_shell, |m| m);
+            }
+
+            if item.close_on_click.unwrap_or(close_on_item_click) {
+                KeyOutcome::CloseAll
+            } else {
+                KeyOutcome::Handled
+            }
+        }
+    }
+}
+
+/// Opens the submenu of `items[index]` from `menu_state` and focuses its first entry.
+fn open_child<Message, Theme: Catalog, Renderer: renderer::Renderer>(
+    menu_state: &mut MenuState,
+    items: &[Item<'_, Message, Theme, Renderer>],
+    item_trees: &mut [Tree],
+    index: usize,
+    shell: &mut Shell<'_, Message>,
+) {
+    menu_state.open_new_menu(index, &items[index], &mut item_trees[index]);
+    menu_state.keyboard_highlight = Some(index);
+    if let Some(child_menu_tree) = item_trees[index].children.get_mut(1) {
+        let first = items[index]
+            .menu
+            .as_deref()
+            .and_then(|m| first_navigable(&m.items));
+        child_menu_tree
+            .state
+            .downcast_mut::<MenuState>()
+            .keyboard_highlight = first;
+    }
+    shell.invalidate_layout();
+    shell.request_redraw();
+}
+
+/// Finds the next entry keyboard navigation can land on, stepping from `from` in the given
+/// direction and wrapping around; skips inert rows (separators, disabled actions). Returns `None`
+/// when no entry is navigable.
+fn next_navigable<Message, Theme: Catalog, Renderer: renderer::Renderer>(
+    items: &[Item<'_, Message, Theme, Renderer>],
+    from: Option<usize>,
+    forward: bool,
+) -> Option<usize> {
+    let len = items.len();
+    if len == 0 {
+        return None;
+    }
+    // Pick a start so the first step lands on index 0 (forward) or the last index (backward) when
+    // nothing is highlighted yet.
+    let start = match from {
+        Some(i) => i,
+        None if forward => len - 1,
+        None => 0,
+    };
+    let mut idx = start;
+    for _ in 0..len {
+        idx = if forward {
+            (idx + 1) % len
+        } else {
+            (idx + len - 1) % len
+        };
+        if items[idx].navigable {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+/// The first entry keyboard navigation can land on, used when a menu gains focus.
+fn first_navigable<Message, Theme: Catalog, Renderer: renderer::Renderer>(
+    items: &[Item<'_, Message, Theme, Renderer>],
+) -> Option<usize> {
+    next_navigable(items, None, true)
 }
 impl<Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
     for MenuBarOverlay<'_, '_, Message, Theme, Renderer>
@@ -188,6 +584,14 @@ where
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
     ) {
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) = event
+            && self.handle_key(key, layout, renderer, clipboard, shell)
+        {
+            shell.capture_event();
+            shell.request_redraw();
+            return;
+        }
+
         let bar = self.tree.state.downcast_mut::<MenuBarState>();
         let MenuBarState {
             global_state,
@@ -223,10 +627,15 @@ where
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 global_state.pressed = true;
+                global_state.keyboard_nav = false;
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 global_state.pressed = false;
                 shell.request_redraw();
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                // The mouse takes over again: hand cursor-based open/close back to the pointer.
+                global_state.keyboard_nav = false;
             }
             Event::Window(window::Event::Resized { .. }) => {
                 bar.close(self.tree.children.as_mut_slice(), shell);
@@ -234,6 +643,14 @@ where
             }
             _ => {}
         }
+
+        // While navigating by keyboard, hide the cursor from the menu recursion so a keyboard-opened
+        // submenu is not closed just because the pointer is elsewhere.
+        let cursor = if global_state.keyboard_nav {
+            mouse::Cursor::Unavailable
+        } else {
+            cursor
+        };
 
         #[rustfmt::skip]
         fn rec<'a, 'b, Message, Theme: Catalog, Renderer: renderer::Renderer>(
@@ -808,7 +1225,7 @@ where
             }
         }
 
-        let theme_style = theme.style(&self.menu_bar.global_parameters.class, Status::Active);
+        let theme_style = theme.style(&self.menu_bar.global_parameters.class);
 
         rec(
             &self.menu_bar.global_parameters,

@@ -62,6 +62,10 @@ Tree{
 pub(crate) struct MenuState {
     pub(crate) scroll_offset: f32,
     pub(crate) active: Index,
+    /// The entry the keyboard focus is on within this menu. Distinct from [`active`](Self::active),
+    /// which tracks the open child menu: an entry can be keyboard-highlighted without its submenu
+    /// being open.
+    pub(crate) keyboard_highlight: Index,
     pub(crate) slice: MenuSlice,
     pub(crate) safe_triangle: Option<SafeTriangle>,
     pub(crate) last_cursor_on_parent: Option<Point>,
@@ -101,6 +105,7 @@ impl Default for MenuState {
         Self {
             scroll_offset: 0.0,
             active: None,
+            keyboard_highlight: None,
             slice: MenuSlice {
                 start_index: 0,
                 end_index: usize::MAX - 1,
@@ -115,7 +120,7 @@ impl Default for MenuState {
 
 /// A menu — a vertical list of [`Item`]s shown in an overlay.
 #[must_use]
-pub struct Menu<'a, Message, Theme, Renderer>
+pub struct Menu<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Theme: Catalog,
     Renderer: renderer::Renderer,
@@ -755,6 +760,28 @@ where
             );
         }
 
+        // Keyboard focus highlight. Drawn regardless of `PathHighlight` mode so keyboard navigation
+        // is always visible; skipped when it coincides with the open path (already drawn above) or
+        // falls outside the visible slice.
+        if let Some(highlight) = menu_state.keyboard_highlight {
+            if menu_state.active != Some(highlight)
+                && highlight >= menu_state.slice.start_index
+                && highlight <= menu_state.slice.end_index
+            {
+                let highlight_in_slice = highlight - menu_state.slice.start_index;
+                if let Some(node) = slice_layout.children().nth(highlight_in_slice) {
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: node.bounds(),
+                            border: theme_style.path_border,
+                            ..Default::default()
+                        },
+                        theme_style.path,
+                    );
+                }
+            }
+        }
+
         renderer.with_layer(items_bounds, |r| {
             itl_iter_slice!(slice, self.items;iter, tree.children;iter, slice_layout.children())
                 .for_each(|((item, tree), layout)| {
@@ -766,7 +793,7 @@ where
 
 /// An item inside a [`Menu`] or a root of the [`MenuBar`](crate::MenuBar).
 #[must_use]
-pub struct Item<'a, Message, Theme, Renderer>
+pub struct Item<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Theme: Catalog,
     Renderer: renderer::Renderer,
@@ -774,6 +801,9 @@ where
     pub(crate) item: Element<'a, Message, Theme, Renderer>,
     pub(crate) menu: Option<Box<Menu<'a, Message, Theme, Renderer>>>,
     pub(crate) close_on_click: Option<bool>,
+    /// Whether keyboard navigation can land on this entry. `false` for inert rows such as
+    /// [`separator`]s and disabled actions, which are skipped by arrow-key movement.
+    pub(crate) navigable: bool,
 }
 impl<'a, Message, Theme, Renderer> Item<'a, Message, Theme, Renderer>
 where
@@ -786,6 +816,7 @@ where
             item: item.into(),
             menu: None,
             close_on_click: None,
+            navigable: true,
         }
     }
 
@@ -798,6 +829,7 @@ where
             item: item.into(),
             menu: Some(Box::new(menu)),
             close_on_click: None,
+            navigable: true,
         }
     }
 
@@ -956,7 +988,10 @@ where
             }
         });
 
-    Item::new(container(line).padding([4, 6]))
+    let mut item = Item::new(container(line).padding([4, 6]));
+    // Inert divider: keyboard navigation skips over it.
+    item.navigable = false;
+    item
 }
 
 /// App-friendly constructors for the built-in [`iced::Theme`].
@@ -982,6 +1017,7 @@ where
             None,
             None,
             on_press,
+            true,
             Box::new(menu_item_style),
         )
     }
@@ -1004,6 +1040,7 @@ where
             on_press,
             icon: None,
             hotkey: None,
+            disabled: false,
             style: None,
         }
     }
@@ -1053,6 +1090,7 @@ where
         icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
         hotkey: Option<iced::widget::text::Fragment<'a>>,
         on_press: Message,
+        enabled: bool,
         style: ButtonStyleFn<'a>,
     ) -> Self {
         use iced::alignment::Vertical;
@@ -1065,13 +1103,24 @@ where
             content = content.push(hotkey_label(hotkey));
         }
 
-        Self::new(
+        // A disabled row publishes no message (`on_press_maybe(None)`).
+        let on_press = enabled.then_some(on_press);
+
+        let mut item = Self::new(
             button(content)
                 .width(Length::Fill)
                 .padding([5, 12])
                 .style(style)
-                .on_press(on_press),
-        )
+                .on_press_maybe(on_press),
+        );
+
+        if !enabled {
+            // A disabled row must not dismiss the tree when clicked, nor catch keyboard focus.
+            item.close_on_click = Some(false);
+            item.navigable = false;
+        }
+
+        item
     }
 
     /// Shared layout for the [`submenu`](Self::submenu) builder: a full-width button whose row
@@ -1139,6 +1188,7 @@ pub struct ActionBuilder<'a, Message> {
     on_press: Message,
     icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
     hotkey: Option<iced::widget::text::Fragment<'a>>,
+    disabled: bool,
     style: Option<ButtonStyleFn<'a>>,
 }
 
@@ -1164,6 +1214,15 @@ where
         self
     }
 
+    /// Marks the action as disabled: it renders greyed out (via [`menu_item_disabled_style`]),
+    /// publishes no message when clicked, and does not dismiss the menu.
+    ///
+    /// A custom [`style`](Self::style) still wins if you set one.
+    pub fn disabled(mut self) -> Self {
+        self.disabled = true;
+        self
+    }
+
     /// Swaps in a custom [`button`] style, replacing the crate's default [`menu_item_style`].
     pub fn style(
         mut self,
@@ -1176,8 +1235,21 @@ where
 
     /// Finishes building, producing the action [`Item`].
     pub fn build(self) -> Item<'a, Message, iced::Theme, iced::Renderer> {
-        let style = self.style.unwrap_or_else(|| Box::new(menu_item_style));
-        Item::leaf_core(self.label, self.icon, self.hotkey, self.on_press, style)
+        let style = self.style.unwrap_or_else(|| {
+            if self.disabled {
+                Box::new(menu_item_disabled_style)
+            } else {
+                Box::new(menu_item_style)
+            }
+        });
+        Item::leaf_core(
+            self.label,
+            self.icon,
+            self.hotkey,
+            self.on_press,
+            !self.disabled,
+            style,
+        )
     }
 }
 

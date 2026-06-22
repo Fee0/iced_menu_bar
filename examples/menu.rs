@@ -11,13 +11,13 @@
 //! - and the crate's built-in default styling (no custom `.style(..)` needed).
 
 use iced::widget::{column, container, svg, text};
-use iced::{Element, Fill, Renderer, Task, Theme};
+use iced::{Element, Fill, Task, Theme};
 
 use iced_menu_bar::{Item, Menu, MenuBar, separator};
 
-/// The widget types are generic over the theme, so the example spells out the concrete
-/// `Theme`/`Renderer` it uses (there are no default type parameters to lean on).
-type MenuItem = Item<'static, Message, Theme, Renderer>;
+/// The widget types default to iced's built-in `Theme`/`Renderer`, so the common case only needs
+/// the lifetime and `Message`.
+type MenuItem = Item<'static, Message>;
 
 pub fn main() -> iced::Result {
     iced::application(App::default, App::update, App::view)
@@ -83,6 +83,8 @@ fn menu_bar() -> Element<'static, Message> {
                 .build(),
             // A hotkey with no icon — still right-aligned, label still lines up via the icon column.
             Item::action("Save", Message::Selected("Save")).hotkey("⌘S").build(),
+            // A disabled action: greyed out, ignores clicks, keeps the menu open.
+            Item::action("Save As…", Message::Selected("Save As")).disabled().build(),
             separator(),
             Item::submenu(
                 "Open Recent",

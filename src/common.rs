@@ -179,7 +179,9 @@ pub(crate) fn clip_node_x(node: &Node, width: f32, offset: f32) -> Node {
 /// Set on the [`MenuBar`](crate::MenuBar) with [`MenuBar::dismiss`](crate::MenuBar::dismiss); a
 /// click outside the menus always dismisses them regardless of this setting. Individual entries
 /// can opt out with [`Item::keep_open`](crate::Item::keep_open) or back in with
-/// [`Item::close_on_click`](crate::Item::close_on_click).
+/// [`Item::close_on_click`](crate::Item::close_on_click). Clicks on a menu's own background
+/// (between entries) are governed separately by
+/// [`MenuBar::close_on_background_click`](crate::MenuBar::close_on_background_click).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dismiss {
     /// Clicking any entry closes the whole menu tree (the default).
@@ -222,6 +224,9 @@ pub(crate) fn try_open_menu<'a, 'b, Message, Theme: Catalog, Renderer: renderer:
     }
 
     if menu_state.active != old_active {
+        // Keep keyboard focus in step with the mouse-opened path so the two highlights don't
+        // diverge when the user switches between mouse and keyboard.
+        menu_state.keyboard_highlight = menu_state.active;
         shell.invalidate_layout();
         shell.request_redraw();
     }
