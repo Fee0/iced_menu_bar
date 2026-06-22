@@ -5,5 +5,5 @@ edition = "2024"
 description = "A custom menu-bar widget for iced with element-based items, submenus and icons."
 
 [dependencies]
-iced = { version = "0.14", features = ["advanced"] }
+iced = { version = "0.14", features = ["advanced", "svg"] }
 thiserror = "2"

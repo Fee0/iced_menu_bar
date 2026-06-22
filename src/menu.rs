@@ -1058,17 +1058,40 @@ where
         style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
         + 'a,
     ) -> Self {
-        use iced::widget::{button, text};
+        use iced::alignment::Vertical;
+        use iced::widget::{button, row, text};
 
         Self::with_menu(
-            button(text(label))
-                .width(Length::Fill)
-                .padding([5, 12])
-                .style(style)
-                .on_press(on_press),
+            button(
+                row![text(label).width(Length::Fill), submenu_chevron()]
+                    .align_y(Vertical::Center)
+                    .spacing(8),
+            )
+            .width(Length::Fill)
+            .padding([5, 12])
+            .style(style)
+            .on_press(on_press),
             menu,
         )
     }
+}
+
+/// The trailing arrow drawn on submenu rows to signal they open a nested flyout.
+///
+/// Colored to match the menu label's resting text color (see [`menu_item_style`]).
+fn submenu_chevron<'a, Message: 'a>() -> Element<'a, Message, iced::Theme, iced::Renderer> {
+    use iced::widget::svg;
+
+    let handle =
+        svg::Handle::from_memory(include_bytes!("../svg/arrow-next-small-svgrepo-com.svg").as_slice());
+
+    svg(handle)
+        .width(14)
+        .height(14)
+        .style(|theme: &iced::Theme, _status| svg::Style {
+            color: Some(theme.extended_palette().background.base.text),
+        })
+        .into()
 }
 
 /// Adaptive open direction
