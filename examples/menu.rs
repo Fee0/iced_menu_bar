@@ -69,15 +69,24 @@ fn menu_bar() -> Element<'static, Message> {
     // buttons. `Item::root` is the content-sized top-level bar button; `Item::submenu` is a
     // full-width in-menu entry that opens a nested flyout; the `*_styled` variants would let us
     // swap in a custom button style per item.
-    // `leaf_with_icon` / `submenu_with_icon` put an icon in a fixed-width column on the left. Every
-    // leaf/submenu row reserves that column, so "Exit" (no icon) still lines up with the iconned
-    // entries above it.
+    // `Item::action(..)` is a builder for action rows: chain `.icon(..)` (a fixed-width column on
+    // the left, reserved on every row so labels align) and/or `.hotkey(..)` (a dimmed, right-aligned
+    // shortcut hint), then `.build()`. Hotkeys are display-only and not available on submenus, which
+    // keep their right-side chevron. "Exit" has neither, yet still lines up with the rows above.
     let file = Item::root(
         "File",
         Message::OpenMenu,
         Menu::new(vec![
-            Item::leaf_with_icon("New", icon(NEW_ICON), Message::Selected("New")),
-            Item::leaf_with_icon("Open", icon(OPEN_ICON), Message::Selected("Open")),
+            Item::action("New", Message::Selected("New"))
+                .icon(icon(NEW_ICON))
+                .hotkey("⌘N")
+                .build(),
+            Item::action("Open", Message::Selected("Open"))
+                .icon(icon(OPEN_ICON))
+                .hotkey("⌘O")
+                .build(),
+            // A hotkey with no icon — still right-aligned, label still lines up via the icon column.
+            Item::action("Save", Message::Selected("Save")).hotkey("⌘S").build(),
             separator(),
             Item::submenu_with_icon(
                 "Open Recent",

@@ -37,6 +37,6 @@ mod style;
 
 pub use common::{DrawPath, ScrollSpeed};
 pub use error::{Error, Result};
-pub use menu::{Item, Menu, separator};
+pub use menu::{ActionBuilder, Item, Menu, separator};
 pub use menu_bar::MenuBar;
 pub use style::{Catalog, Status, Style, StyleFn, menu_item_style, primary};

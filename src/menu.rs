@@ -993,7 +993,7 @@ where
         style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
         + 'a,
     ) -> Self {
-        Self::leaf_core(label, None, on_press, style)
+        Self::leaf_core(label, None, None, on_press, style)
     }
 
     /// Like [`leaf`](Self::leaf), but with an `icon` shown to the left of the label.
@@ -1018,14 +1018,16 @@ where
         style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
         + 'a,
     ) -> Self {
-        Self::leaf_core(label, Some(icon.into()), on_press, style)
+        Self::leaf_core(label, Some(icon.into()), None, on_press, style)
     }
 
-    /// Shared layout for [`leaf`](Self::leaf) and [`leaf_with_icon`](Self::leaf_with_icon): a
-    /// full-width button whose row reserves a fixed-width icon column followed by the label.
+    /// Shared layout for [`leaf`](Self::leaf), [`leaf_with_icon`](Self::leaf_with_icon) and
+    /// [`action`](Self::action): a full-width button whose row reserves a fixed-width icon column,
+    /// the label, and an optional right-aligned hotkey hint.
     fn leaf_core(
         label: impl iced::widget::text::IntoFragment<'a>,
         icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
+        hotkey: Option<iced::widget::text::Fragment<'a>>,
         on_press: Message,
         style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
         + 'a,
@@ -1033,17 +1035,42 @@ where
         use iced::alignment::Vertical;
         use iced::widget::{button, row, text};
 
+        let mut content = row![icon_slot(icon), text(label).width(Length::Fill)]
+            .align_y(Vertical::Center)
+            .spacing(8);
+        if let Some(hotkey) = hotkey {
+            content = content.push(hotkey_label(hotkey));
+        }
+
         Self::new(
-            button(
-                row![icon_slot(icon), text(label).width(Length::Fill)]
-                    .align_y(Vertical::Center)
-                    .spacing(8),
-            )
-            .width(Length::Fill)
-            .padding([5, 12])
-            .style(style)
-            .on_press(on_press),
+            button(content)
+                .width(Length::Fill)
+                .padding([5, 12])
+                .style(style)
+                .on_press(on_press),
         )
+    }
+
+    /// Starts building an action (leaf) row with optional decorations.
+    ///
+    /// Chain [`icon`](ActionBuilder::icon) (left of the label), [`hotkey`](ActionBuilder::hotkey)
+    /// (a dimmed shortcut hint right-aligned on the row) and/or [`style`](ActionBuilder::style),
+    /// then finish with [`build`](ActionBuilder::build) (or rely on its `Into<Item>`). For a plain
+    /// action with no decorations, [`leaf`](Self::leaf) is shorter.
+    ///
+    /// Hotkeys are display-only hints — they do not register or handle key events — and are not
+    /// available on submenu rows.
+    pub fn action(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        on_press: Message,
+    ) -> ActionBuilder<'a, Message> {
+        ActionBuilder {
+            label: label.into_fragment(),
+            on_press,
+            icon: None,
+            hotkey: None,
+            style: None,
+        }
     }
 
     /// Creates a root [`Item`]: a content-sized button that opens `menu`, styled with the crate's
@@ -1160,6 +1187,79 @@ where
     }
 }
 
+/// A boxed [`button`] style function, used by [`ActionBuilder`] to carry a per-action custom style.
+type ButtonStyleFn<'a> =
+    Box<dyn Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style + 'a>;
+
+/// A chainable builder for an action (leaf) [`Item`] on the built-in [`iced::Theme`].
+///
+/// Created by [`Item::action`]. All decorations are optional; finish with [`build`](Self::build)
+/// or rely on its [`From`]/`Into<Item>` conversion:
+///
+/// ```ignore
+/// Menu::new(vec![
+///     Item::action("Save", Message::Save).hotkey("⌘S").build(),
+///     Item::action("Open", Message::Open).icon(icon).hotkey("⌘O").build(),
+/// ]);
+/// ```
+#[must_use]
+pub struct ActionBuilder<'a, Message> {
+    label: iced::widget::text::Fragment<'a>,
+    on_press: Message,
+    icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
+    hotkey: Option<iced::widget::text::Fragment<'a>>,
+    style: Option<ButtonStyleFn<'a>>,
+}
+
+impl<'a, Message> ActionBuilder<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    /// Sets the icon shown to the left of the label, in the fixed-width column reserved on every
+    /// leaf/submenu row. The icon is any [`Element`]; size it to about 16×16 (see
+    /// [`Item::leaf_with_icon`]). You control its color.
+    pub fn icon(
+        mut self,
+        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+    ) -> Self {
+        self.icon = Some(icon.into());
+        self
+    }
+
+    /// Sets a keyboard-shortcut hint shown, dimmed and right-aligned, on the row (e.g. `"⌘S"`).
+    ///
+    /// Display-only — it does not register or handle the key combination.
+    pub fn hotkey(mut self, hotkey: impl iced::widget::text::IntoFragment<'a>) -> Self {
+        self.hotkey = Some(hotkey.into_fragment());
+        self
+    }
+
+    /// Swaps in a custom [`button`] style, replacing the crate's default [`menu_item_style`].
+    pub fn style(
+        mut self,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
+        self.style = Some(Box::new(style));
+        self
+    }
+
+    /// Finishes building, producing the action [`Item`].
+    pub fn build(self) -> Item<'a, Message, iced::Theme, iced::Renderer> {
+        let style = self.style.unwrap_or_else(|| Box::new(menu_item_style));
+        Item::leaf_core(self.label, self.icon, self.hotkey, self.on_press, style)
+    }
+}
+
+impl<'a, Message> From<ActionBuilder<'a, Message>> for Item<'a, Message, iced::Theme, iced::Renderer>
+where
+    Message: Clone + 'a,
+{
+    fn from(builder: ActionBuilder<'a, Message>) -> Self {
+        builder.build()
+    }
+}
+
 /// Recommended icon box size; the documented target for caller-supplied leaf/submenu icons.
 const ICON_SIZE: f32 = 16.0;
 /// Fixed width of the reserved icon column. Identical for icon and icon-less rows so labels align.
@@ -1181,6 +1281,29 @@ fn icon_slot<'a, Message: 'a>(
         .height(Length::Fixed(ICON_SIZE))
         .align_x(Horizontal::Center)
         .align_y(Vertical::Center)
+        .into()
+}
+
+/// Opacity applied to the normal label color for right-side hotkey hints, so they read a touch
+/// dimmer and distinct from the label without losing legibility.
+const HOTKEY_ALPHA: f32 = 0.6;
+
+/// A dimmed keyboard-shortcut hint shown on the right of an action row.
+///
+/// Like [`submenu_chevron`], its color is not hover-aware — it stays a faded variant of the menu
+/// label's resting text color (see [`menu_item_style`]) across all states.
+fn hotkey_label<'a, Message: 'a>(
+    hotkey: iced::widget::text::Fragment<'a>,
+) -> Element<'a, Message, iced::Theme, iced::Renderer> {
+    use iced::widget::text;
+
+    text(hotkey)
+        .style(|theme: &iced::Theme| text::Style {
+            color: Some(iced::Color {
+                a: HOTKEY_ALPHA,
+                ..theme.extended_palette().background.base.text
+            }),
+        })
         .into()
 }
 
