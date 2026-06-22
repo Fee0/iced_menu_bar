@@ -993,14 +993,56 @@ where
         style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
         + 'a,
     ) -> Self {
-        use iced::widget::{button, text};
+        Self::leaf_core(label, None, on_press, style)
+    }
+
+    /// Like [`leaf`](Self::leaf), but with an `icon` shown to the left of the label.
+    ///
+    /// The icon is any [`Element`] (an [`svg`](iced::widget::svg), [`image`](iced::widget::image)
+    /// or even a text glyph) and is rendered, centered, in a fixed-width column reserved on *every*
+    /// leaf and submenu row — so labels stay aligned whether or not a given entry has an icon.
+    /// Size your icon to about 16×16 to match the column; you control its color (no auto-tinting).
+    pub fn leaf_with_icon(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+        on_press: Message,
+    ) -> Self {
+        Self::leaf_with_icon_styled(label, icon, on_press, menu_item_style)
+    }
+
+    /// Like [`leaf_with_icon`](Self::leaf_with_icon), but with a custom [`button`] style.
+    pub fn leaf_with_icon_styled(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+        on_press: Message,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
+        Self::leaf_core(label, Some(icon.into()), on_press, style)
+    }
+
+    /// Shared layout for [`leaf`](Self::leaf) and [`leaf_with_icon`](Self::leaf_with_icon): a
+    /// full-width button whose row reserves a fixed-width icon column followed by the label.
+    fn leaf_core(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
+        on_press: Message,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
+        use iced::alignment::Vertical;
+        use iced::widget::{button, row, text};
 
         Self::new(
-            button(text(label))
-                .width(Length::Fill)
-                .padding([5, 12])
-                .style(style)
-                .on_press(on_press),
+            button(
+                row![icon_slot(icon), text(label).width(Length::Fill)]
+                    .align_y(Vertical::Center)
+                    .spacing(8),
+            )
+            .width(Length::Fill)
+            .padding([5, 12])
+            .style(style)
+            .on_press(on_press),
         )
     }
 
@@ -1058,12 +1100,54 @@ where
         style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
         + 'a,
     ) -> Self {
+        Self::submenu_core(label, None, on_press, menu, style)
+    }
+
+    /// Like [`submenu`](Self::submenu), but with an `icon` shown to the left of the label.
+    ///
+    /// The icon is any [`Element`] (an [`svg`](iced::widget::svg), [`image`](iced::widget::image)
+    /// or even a text glyph) and is rendered, centered, in a fixed-width column reserved on *every*
+    /// leaf and submenu row — so labels stay aligned whether or not a given entry has an icon. The
+    /// submenu chevron remains on the right. Size your icon to about 16×16 to match the column; you
+    /// control its color (no auto-tinting).
+    pub fn submenu_with_icon(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+        on_press: Message,
+        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+    ) -> Self {
+        Self::submenu_with_icon_styled(label, icon, on_press, menu, menu_item_style)
+    }
+
+    /// Like [`submenu_with_icon`](Self::submenu_with_icon), but with a custom [`button`] style.
+    pub fn submenu_with_icon_styled(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        icon: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+        on_press: Message,
+        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
+        Self::submenu_core(label, Some(icon.into()), on_press, menu, style)
+    }
+
+    /// Shared layout for [`submenu`](Self::submenu) and
+    /// [`submenu_with_icon`](Self::submenu_with_icon): a full-width button whose row reserves a
+    /// fixed-width icon column, the label, and a trailing submenu chevron.
+    fn submenu_core(
+        label: impl iced::widget::text::IntoFragment<'a>,
+        icon: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
+        on_press: Message,
+        menu: Menu<'a, Message, iced::Theme, iced::Renderer>,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
+        + 'a,
+    ) -> Self {
         use iced::alignment::Vertical;
         use iced::widget::{button, row, text};
 
         Self::with_menu(
             button(
-                row![text(label).width(Length::Fill), submenu_chevron()]
+                row![icon_slot(icon), text(label).width(Length::Fill), submenu_chevron()]
                     .align_y(Vertical::Center)
                     .spacing(8),
             )
@@ -1074,6 +1158,30 @@ where
             menu,
         )
     }
+}
+
+/// Recommended icon box size; the documented target for caller-supplied leaf/submenu icons.
+const ICON_SIZE: f32 = 16.0;
+/// Fixed width of the reserved icon column. Identical for icon and icon-less rows so labels align.
+const ICON_SLOT_WIDTH: f32 = 20.0;
+
+/// The fixed-width left column reserved on every leaf/submenu row.
+///
+/// `Some(icon)` renders the icon centered in the column; `None` reserves the exact same width with
+/// an empty spacer — so labels line up across a menu mixing icon and icon-less entries.
+fn icon_slot<'a, Message: 'a>(
+    content: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
+) -> Element<'a, Message, iced::Theme, iced::Renderer> {
+    use iced::alignment::{Horizontal, Vertical};
+    use iced::widget::{Space, container};
+
+    let inner = content.unwrap_or_else(|| Space::new().into());
+    container(inner)
+        .width(Length::Fixed(ICON_SLOT_WIDTH))
+        .height(Length::Fixed(ICON_SIZE))
+        .align_x(Horizontal::Center)
+        .align_y(Vertical::Center)
+        .into()
 }
 
 /// The trailing arrow drawn on submenu rows to signal they open a nested flyout.

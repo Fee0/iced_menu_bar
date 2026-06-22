@@ -10,7 +10,7 @@
 //! - the fallible [`Menu::try_new`] constructor returning [`iced_menu_bar::Result`],
 //! - and the crate's built-in default styling (no custom `.style(..)` needed).
 
-use iced::widget::{column, container, text};
+use iced::widget::{column, container, svg, text};
 use iced::{Element, Fill, Renderer, Task, Theme};
 
 use iced_menu_bar::{Item, Menu, MenuBar, separator};
@@ -69,15 +69,19 @@ fn menu_bar() -> Element<'static, Message> {
     // buttons. `Item::root` is the content-sized top-level bar button; `Item::submenu` is a
     // full-width in-menu entry that opens a nested flyout; the `*_styled` variants would let us
     // swap in a custom button style per item.
+    // `leaf_with_icon` / `submenu_with_icon` put an icon in a fixed-width column on the left. Every
+    // leaf/submenu row reserves that column, so "Exit" (no icon) still lines up with the iconned
+    // entries above it.
     let file = Item::root(
         "File",
         Message::OpenMenu,
         Menu::new(vec![
-            leaf("New"),
-            leaf("Open"),
+            Item::leaf_with_icon("New", icon(NEW_ICON), Message::Selected("New")),
+            Item::leaf_with_icon("Open", icon(OPEN_ICON), Message::Selected("Open")),
             separator(),
-            Item::submenu(
+            Item::submenu_with_icon(
                 "Open Recent",
+                icon(OPEN_ICON),
                 Message::OpenMenu,
                 Menu::new(vec![leaf("project.hex"), leaf("notes.txt")]),
             ),
@@ -109,4 +113,20 @@ fn menu_bar() -> Element<'static, Message> {
 /// A leaf entry that publishes [`Message::Selected`] with its own label when clicked.
 fn leaf(label: &'static str) -> MenuItem {
     Item::leaf(label, Message::Selected(label))
+}
+
+const NEW_ICON: &[u8] = include_bytes!("../svg/file-plus.svg");
+const OPEN_ICON: &[u8] = include_bytes!("../svg/folder.svg");
+
+/// Builds a 16×16 menu icon from raw SVG bytes, tinted to follow the theme's text color.
+///
+/// The crate hands the icon column to the caller untinted, so styling is done here.
+fn icon(bytes: &'static [u8]) -> Element<'static, Message> {
+    svg(svg::Handle::from_memory(bytes))
+        .width(16)
+        .height(16)
+        .style(|theme: &Theme, _status| svg::Style {
+            color: Some(theme.extended_palette().background.base.text),
+        })
+        .into()
 }
