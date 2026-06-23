@@ -454,34 +454,45 @@ where
 
             match op {
                 Op::UpdateItems => {
-                    itl_iter_slice!(
-                        menu_state.slice,
+                    let redraw_requested =
+                        matches!(event, Event::Window(window::Event::RedrawRequested(_)));
+                    let slice = menu_state.slice;
+                    let active = menu_state.active;
+                    let keyboard_highlight = menu_state.keyboard_highlight;
+
+                    itl_iter_slice_enum!(
+                        slice,
                         self.items;iter_mut,
                         item_trees;iter_mut,
                         slice_layout.children()
                     )
-                    .for_each(|((item, tree), layout)| {
+                    .for_each(|(i, ((item, tree), layout))| {
+                        let item_cursor = if redraw_requested && global_state.keyboard_nav {
+                            if active == Some(i) || keyboard_highlight == Some(i) {
+                                mouse::Cursor::Available(layout.bounds().center())
+                            } else {
+                                mouse::Cursor::Unavailable
+                            }
+                        } else {
+                            cursor
+                        };
+
                         item.update(
-                            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+                            tree,
+                            event,
+                            layout,
+                            item_cursor,
+                            renderer,
+                            clipboard,
+                            shell,
+                            viewport,
                         );
                     });
                 }
                 Op::RedrawUpdate => {
-                    let cursor = if let Some(active) = menu_state.active {
-                        let active_in_slice = active - menu_state.slice.start_index;
-                        let center = slice_layout
-                            .children()
-                            .nth(active_in_slice)
-                            .expect(
-                                "Index (in slice space) is not within the slice layout. \
-                                This should not happen, please report this issue",
-                            )
-                            .bounds()
-                            .center();
-                        mouse::Cursor::Available(center)
-                    } else {
-                        cursor
-                    };
+                    let slice = menu_state.slice;
+                    let active = menu_state.active;
+                    let keyboard_highlight = menu_state.keyboard_highlight;
 
                     let mut temp_messages = vec![];
                     let mut temp_shell = Shell::new(&mut temp_messages);
@@ -489,13 +500,19 @@ where
                     let redraw_event =
                         Event::Window(window::Event::RedrawRequested(Instant::now()));
 
-                    itl_iter_slice!(
-                        menu_state.slice,
+                    itl_iter_slice_enum!(
+                        slice,
                         self.items;iter_mut,
                         item_trees;iter_mut,
                         slice_layout.children()
                     )
-                    .for_each(|((item, tree), layout)| {
+                    .for_each(|(i, ((item, tree), layout))| {
+                        let cursor = if active == Some(i) || keyboard_highlight == Some(i) {
+                            mouse::Cursor::Available(layout.bounds().center())
+                        } else {
+                            mouse::Cursor::Unavailable
+                        };
+
                         item.update(
                             tree,
                             &redraw_event,
