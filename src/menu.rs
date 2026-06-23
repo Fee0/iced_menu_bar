@@ -837,6 +837,8 @@ where
     /// Whether this entry is a [`separator`], drawn by the menu as a hairline in
     /// [`Style::separator`] so it honors the bar's resolved style.
     pub(crate) separator: bool,
+    /// Whether this entry is a [`group_header`], an inert labelled divider that groups entries.
+    pub(crate) group_header: bool,
 }
 impl<'a, Message, Theme, Renderer> Item<'a, Message, Theme, Renderer>
 where
@@ -851,6 +853,7 @@ where
             close_on_click: None,
             navigable: true,
             separator: false,
+            group_header: false,
         }
     }
 
@@ -865,6 +868,7 @@ where
             close_on_click: None,
             navigable: true,
             separator: false,
+            group_header: false,
         }
     }
 
@@ -1030,6 +1034,36 @@ where
     item
 }
 
+/// A labelled section header [`Item`] for grouping entries in a [`Menu`].
+///
+/// The header is inert: keyboard navigation skips it and clicking it does nothing. The text renders
+/// dimmed to visually distinguish it from actionable rows, using a theme-aware style closure so it
+/// adapts to light and dark themes.
+pub fn group_header<'a, Message>(
+    label: impl iced::widget::text::IntoFragment<'a>,
+) -> Item<'a, Message, iced::Theme, iced::Renderer>
+where
+    Message: 'a,
+{
+    use iced::widget::{container, text};
+
+    let content = container(
+        text(label.into_fragment()).style(|theme: &iced::Theme| iced::widget::text::Style {
+            color: Some(iced::Color {
+                a: 0.55,
+                ..theme.extended_palette().background.base.text
+            }),
+        }),
+    )
+    .width(Length::Fill)
+    .padding([4.0, 12.0]);
+
+    let mut item = Item::new(content);
+    item.navigable = false;
+    item.group_header = true;
+    item
+}
+
 /// App-friendly constructors for the built-in [`iced::Theme`].
 ///
 /// These build a styled menu [`button`] for you — the same baseline look as [`menu_item_style`]
@@ -1058,6 +1092,8 @@ where
             true,
             Box::new(menu_item_style),
             RowLayout::menu_row(),
+            None,
+            None,
         )
     }
 
@@ -1088,6 +1124,8 @@ where
             icon_slot_width: None,
             padding: None,
             content_spacing: None,
+            checked: None,
+            radio: None,
         }
     }
 
@@ -1148,12 +1186,39 @@ where
         enabled: bool,
         style: ButtonStyleFn<'a>,
         layout: RowLayout,
+        checked: Option<bool>,
+        radio: Option<bool>,
     ) -> Self {
         use iced::alignment::Vertical;
         use iced::widget::{button, row, text};
 
+        // Check/radio indicator takes over the icon slot; a user-provided icon is only shown when
+        // neither is set. When the state is `false` (unchecked/unselected) the slot stays empty so
+        // labels line up with checked peers.
+        let slot_content: Option<Element<'a, Message, iced::Theme, iced::Renderer>> =
+            if let Some(is_checked) = checked {
+                is_checked.then(|| {
+                    text("✓")
+                        .style(|theme: &iced::Theme| iced::widget::text::Style {
+                            color: Some(theme.extended_palette().background.base.text),
+                        })
+                        .into()
+                })
+            } else if let Some(is_selected) = radio {
+                is_selected.then(|| {
+                    text("⬤")
+                        .size(10.0)
+                        .style(|theme: &iced::Theme| iced::widget::text::Style {
+                            color: Some(theme.extended_palette().background.base.text),
+                        })
+                        .into()
+                })
+            } else {
+                icon
+            };
+
         let mut content = row![
-            icon_slot(icon, layout.icon_slot_width, layout.icon_size),
+            icon_slot(slot_content, layout.icon_slot_width, layout.icon_size),
             text(label).width(Length::Fill)
         ]
         .align_y(Vertical::Center)
@@ -1267,6 +1332,10 @@ pub struct ActionBuilder<'a, Message> {
     icon_slot_width: Option<f32>,
     padding: Option<Padding>,
     content_spacing: Option<f32>,
+    /// `Some(true/false)` makes the icon slot show a `✓` or empty space respectively.
+    checked: Option<bool>,
+    /// `Some(true/false)` makes the icon slot show a `•` or empty space respectively.
+    radio: Option<bool>,
 }
 
 impl<'a, Message> ActionBuilder<'a, Message>
@@ -1318,6 +1387,22 @@ where
     /// a custom [`style`](Self::style) is set.
     pub fn disabled_alpha(mut self, alpha: f32) -> Self {
         self.disabled_alpha = Some(alpha);
+        self
+    }
+
+    /// Shows a `✓` in the icon slot when `is_checked` is `true`, or an empty slot when `false`,
+    /// so the label aligns with other checked/unchecked peers.
+    ///
+    /// Takes precedence over [`icon`](Self::icon): the icon is not shown when this is set.
+    pub fn checked(mut self, is_checked: bool) -> Self {
+        self.checked = Some(is_checked);
+        self
+    }
+
+    /// Shows a `•` in the icon slot when `is_selected` is `true`, or an empty slot when `false`,
+    /// for exclusive option groups (radio buttons). Takes precedence over [`icon`](Self::icon).
+    pub fn radio(mut self, is_selected: bool) -> Self {
+        self.radio = Some(is_selected);
         self
     }
 
@@ -1384,6 +1469,8 @@ where
             !self.disabled,
             style,
             layout,
+            self.checked,
+            self.radio,
         )
     }
 }

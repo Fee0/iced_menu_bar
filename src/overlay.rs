@@ -457,6 +457,7 @@ where
         let MenuBarState {
             global_state,
             menu_state: bar_menu_state,
+            ..
         } = bar;
         let slice = bar_menu_state.slice;
 
@@ -597,6 +598,7 @@ where
         let MenuBarState {
             global_state,
             menu_state: bar_menu_state,
+            ..
         } = bar;
         let slice = bar_menu_state.slice;
 
@@ -837,6 +839,7 @@ where
         let MenuBarState {
             global_state,
             menu_state: bar_menu_state,
+            ..
         } = bar;
 
         if !global_state.open {
@@ -903,6 +906,7 @@ where
         let MenuBarState {
             global_state,
             menu_state: bar_menu_state,
+            ..
         } = bar;
 
         if !global_state.open {
@@ -976,6 +980,7 @@ where
         let MenuBarState {
             global_state,
             menu_state: bar_menu_state,
+            ..
         } = bar;
         let slice = bar_menu_state.slice;
 
@@ -1144,6 +1149,7 @@ where
         let MenuBarState {
             global_state,
             menu_state: bar_menu_state,
+            ..
         } = bar;
 
         if !global_state.open {
@@ -1222,7 +1228,7 @@ where
             }
         }
 
-        let theme_style = theme.style(&self.menu_bar.global_parameters.class, Status::Selected);
+        let theme_style = <Theme as Catalog>::style(theme, &self.menu_bar.global_parameters.class, Status::Selected);
 
         rec(
             &self.menu_bar.global_parameters,

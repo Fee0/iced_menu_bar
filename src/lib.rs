@@ -35,8 +35,8 @@ mod overlay;
 mod style;
 
 pub use common::{Dismiss, PathHighlight};
-pub use menu::{ActionBuilder, Item, Menu, RootBuilder, SubmenuBuilder, separator};
-pub use menu_bar::MenuBar;
+pub use menu::{ActionBuilder, Item, Menu, RootBuilder, SubmenuBuilder, group_header, separator};
+pub use menu_bar::{MenuBar, MenuBarId, close_menu, open_root};
 pub use style::{
     Catalog, DISABLED_ALPHA, Status, Style, StyleFn, default_style, menu_item_disabled_style,
     menu_item_disabled_style_with, menu_item_style,

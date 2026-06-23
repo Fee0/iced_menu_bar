@@ -5,10 +5,11 @@
 #![allow(clippy::enum_glob_use)]
 
 use iced::advanced::layout::{Limits, Node};
-use iced::advanced::widget::{Operation, Tree, tree};
+use iced::advanced::widget::{Id as WidgetId, Operation, Tree, tree};
 use iced::advanced::{Clipboard, Layout, Shell, Widget, overlay, renderer};
 use iced::{
-    Alignment, Element, Event, Length, Padding, Pixels, Rectangle, Size, Vector, mouse, window,
+    Alignment, Element, Event, Length, Padding, Pixels, Rectangle, Size,
+    Vector, keyboard, mouse, window,
 };
 
 use crate::common::*;
@@ -31,6 +32,13 @@ pub(crate) struct GlobalState {
     /// closing (a keyboard-opened submenu must not be torn down just because the cursor is not
     /// over it). Reset as soon as the mouse moves.
     pub(crate) keyboard_nav: bool,
+    /// `true` while Alt/F10 has activated the bar but no submenu is open yet. Arrow Left/Right
+    /// moves the focus across roots; Arrow Down / Enter / Space opens the focused root.
+    pub(crate) bar_focused: bool,
+    /// Set by a widget operation ([`open_root`]) and consumed in `update()`.
+    pub(crate) pending_open: Option<usize>,
+    /// Set by a widget operation ([`close_menu`]) and consumed in `update()`.
+    pub(crate) pending_close: bool,
     task: Option<MenuBarTask>,
 }
 impl GlobalState {
@@ -47,37 +55,12 @@ impl GlobalState {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub(crate) struct MenuBarState {
     pub(crate) global_state: GlobalState,
     pub(crate) menu_state: MenuState,
 }
 impl MenuBarState {
-    pub(crate) fn open<'a, 'b, Message, Theme: Catalog, Renderer: renderer::Renderer>(
-        &mut self,
-        roots: &mut [Item<'a, Message, Theme, Renderer>],
-        item_trees: &mut [Tree],
-        item_layouts: impl Iterator<Item = Layout<'b>>,
-        cursor: mouse::Cursor,
-        shell: &mut Shell<'_, Message>,
-    ) {
-        if !self.global_state.open {
-            self.global_state.open = true;
-            self.menu_state.active = None;
-        }
-
-        try_open_menu(
-            roots,
-            &mut self.menu_state,
-            item_trees,
-            item_layouts,
-            cursor,
-            shell,
-        );
-
-        self.global_state.clear_task();
-    }
-
     pub(crate) fn close<Message>(
         &mut self,
         item_trees: &mut [Tree],
@@ -97,7 +80,9 @@ impl MenuBarState {
         self.global_state.clear_task();
         self.global_state.open = false;
         self.global_state.keyboard_nav = false;
+        self.global_state.bar_focused = false;
         self.menu_state.active = None;
+        self.menu_state.keyboard_highlight = None;
         shell.request_redraw();
     }
 }
@@ -114,6 +99,7 @@ where
     Renderer: renderer::Renderer,
 {
     pub(crate) roots: Vec<Item<'a, Message, Theme, Renderer>>,
+    id: Option<WidgetId>,
     spacing: Pixels,
     padding: Padding,
     width: Length,
@@ -135,6 +121,7 @@ where
 
         Self {
             roots,
+            id: None,
             spacing: Pixels(4.0),
             padding: Padding {
                 top: 0.0,
@@ -153,9 +140,16 @@ where
                 close_on_item_click: true,
                 close_on_background_click: false,
                 open_on_hover: false,
-                class: Theme::default(),
+                class: <Theme as Catalog>::default(),
             },
         }
+    }
+
+    /// Sets the unique [`MenuBarId`] of the [`MenuBar`], enabling programmatic control via
+    /// [`open_root`] and [`close_menu`].
+    pub fn id(mut self, id: MenuBarId) -> Self {
+        self.id = Some(id.0);
+        self
     }
 
     /// Sets the width of the [`MenuBar`].
@@ -230,14 +224,14 @@ where
     /// Sets the style of the [`MenuBar`].
     pub fn style(mut self, style: impl Fn(&Theme, Status) -> Style + 'a) -> Self
     where
-        Theme::Class<'a>: From<StyleFn<'a, Theme, Style>>,
+        <Theme as Catalog>::Class<'a>: From<StyleFn<'a, Theme, Style>>,
     {
         self.global_parameters.class = (Box::new(style) as StyleFn<'a, Theme, Style>).into();
         self
     }
 
     /// Sets the class of the input of the [`MenuBar`].
-    pub fn class(mut self, class: impl Into<Theme::Class<'a>>) -> Self {
+    pub fn class(mut self, class: impl Into<<Theme as Catalog>::Class<'a>>) -> Self {
         self.global_parameters.class = class.into();
         self
     }
@@ -260,24 +254,24 @@ where
         tree::State::Some(Box::<MenuBarState>::default())
     }
 
-    /// \[Tree{stateless, \[widget_state, menu_state]}...]
     fn children(&self) -> Vec<Tree> {
-        self.roots.iter().map(Item::tree).collect::<Vec<_>>()
+        self.roots.iter().map(Item::tree).collect()
     }
 
-    /// tree: Tree{bar, \[item_tree...]}
     fn diff(&self, tree: &mut Tree) {
-        tree.diff_children_custom(&self.roots, |tree, item| item.diff(tree), Item::tree);
+        tree.diff_children_custom(
+            &self.roots,
+            |tree, item| item.diff(tree),
+            |item| item.tree(),
+        );
     }
 
     /// tree: Tree{bar, \[item_tree...]}
     ///
     /// out: Node{bar bounds , \[widget_layout, widget_layout, ...]}
     fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
-        let MenuBarState {
-            menu_state: bar_menu_state,
-            ..
-        } = tree.state.downcast_mut::<MenuBarState>();
+        let bar_state = tree.state.downcast_mut::<MenuBarState>();
+        let bar_menu_state = &mut bar_state.menu_state;
 
         let items_node = flex::resolve(
             flex::Axis::Horizontal,
@@ -322,12 +316,12 @@ where
 
         let lower_bound_rel = self.padding.left - bar_menu_state.scroll_offset;
         let upper_bound_rel = lower_bound_rel + resolved_width - self.padding.x();
+        let slice_width = resolved_width - self.padding.x();
 
         let slice =
             MenuSlice::from_bounds_rel(lower_bound_rel, upper_bound_rel, &items_node, |n| {
                 n.bounds().x
             });
-
         bar_menu_state.slice = slice;
 
         let slice_node = if self.roots.is_empty() {
@@ -337,7 +331,7 @@ where
             let node = &items_node.children()[slice.start_index];
             let bounds = node.bounds();
             let start_offset = slice.lower_bound_rel - bounds.x;
-            let width = slice.upper_bound_rel - slice.lower_bound_rel;
+            let width = (slice.upper_bound_rel - slice.lower_bound_rel).min(slice_width);
 
             Node::with_children(
                 Size::new(width, items_node.bounds().height),
@@ -355,7 +349,7 @@ where
             let end_node = {
                 let node = &items_node.children()[slice.end_index];
                 let bounds = node.bounds();
-                let width = slice.upper_bound_rel - bounds.x;
+                let width = (slice.upper_bound_rel - bounds.x).min(slice_width);
                 clip_node_x(node, width, 0.0)
             };
 
@@ -372,12 +366,13 @@ where
             )
         };
 
+        let children = vec![slice_node.translate([bar_menu_state.scroll_offset, 0.0])];
         Node::with_children(
             Size {
                 width: resolved_width,
                 height: items_node_bounds.height,
             },
-            [slice_node.translate([bar_menu_state.scroll_offset, 0.0])].into(),
+            children,
         )
     }
 
@@ -399,11 +394,37 @@ where
             children: item_trees,
             ..
         } = tree;
-        let bar = state.downcast_mut::<MenuBarState>();
-        let MenuBarState {
-            global_state,
-            menu_state: bar_menu_state,
-        } = bar;
+        let bar_state = state.downcast_mut::<MenuBarState>();
+        let global_state = &mut bar_state.global_state;
+        let bar_menu_state = &mut bar_state.menu_state;
+
+        // Consume any pending operations set by operate() (open_root / close_menu).
+        if let Some(idx) = global_state.pending_open.take() {
+            if idx < self.roots.len() && self.roots[idx].menu.is_some() {
+                global_state.open = true;
+                global_state.keyboard_nav = false;
+                global_state.bar_focused = false;
+                bar_menu_state.active = None;
+                let item = &self.roots[idx];
+                bar_menu_state.open_new_menu(idx, item, &mut item_trees[idx]);
+                shell.invalidate_layout();
+                shell.request_redraw();
+            }
+        } else if global_state.pending_close {
+            global_state.pending_close = false;
+            for item_tree in item_trees.iter_mut() {
+                if item_tree.children.len() == 2 {
+                    let _ = item_tree.children.pop();
+                    shell.invalidate_layout();
+                }
+            }
+            global_state.open = false;
+            global_state.keyboard_nav = false;
+            global_state.bar_focused = false;
+            bar_menu_state.active = None;
+            bar_menu_state.keyboard_highlight = None;
+            shell.request_redraw();
+        }
 
         let slice = bar_menu_state.slice;
         let bar_is_open = global_state.open;
@@ -462,16 +483,36 @@ where
                 if let Some(task) = global_state.task() {
                     match task {
                         MenuBarTask::OpenOnClick => {
-                            bar.open(
+                            if !global_state.open {
+                                global_state.open = true;
+                                bar_menu_state.active = None;
+                            }
+                            try_open_menu(
                                 &mut self.roots,
+                                bar_menu_state,
                                 item_trees,
                                 slice_layout.children(),
                                 cursor,
                                 shell,
                             );
+                            global_state.clear_task();
                         }
                         MenuBarTask::CloseOnClick => {
-                            bar.close(item_trees, shell);
+                            if !global_state.pressed {
+                                for item_tree in item_trees.iter_mut() {
+                                    if item_tree.children.len() == 2 {
+                                        let _ = item_tree.children.pop();
+                                        shell.invalidate_layout();
+                                    }
+                                }
+                                global_state.clear_task();
+                                global_state.open = false;
+                                global_state.keyboard_nav = false;
+                                global_state.bar_focused = false;
+                                bar_menu_state.active = None;
+                                bar_menu_state.keyboard_highlight = None;
+                                shell.request_redraw();
+                            }
                         }
                     }
                 }
@@ -487,20 +528,38 @@ where
                         shell,
                     );
                     shell.capture_event();
-                } else {
-                    bar.close(item_trees, shell);
+                } else if !global_state.pressed {
+                    for item_tree in item_trees.iter_mut() {
+                        if item_tree.children.len() == 2 {
+                            let _ = item_tree.children.pop();
+                            shell.invalidate_layout();
+                        }
+                    }
+                    global_state.clear_task();
+                    global_state.open = false;
+                    global_state.keyboard_nav = false;
+                    global_state.bar_focused = false;
+                    bar_menu_state.active = None;
+                    bar_menu_state.keyboard_highlight = None;
+                    shell.request_redraw();
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
                 if self.global_parameters.open_on_hover && cursor.is_over(bar_bounds) =>
             {
-                bar.open(
+                if !global_state.open {
+                    global_state.open = true;
+                    bar_menu_state.active = None;
+                }
+                try_open_menu(
                     &mut self.roots,
+                    bar_menu_state,
                     item_trees,
                     slice_layout.children(),
                     cursor,
                     shell,
                 );
+                global_state.clear_task();
                 shell.capture_event();
             }
             // Request a redraw so the hover highlight updates even when the menu is closed and
@@ -535,6 +594,75 @@ where
                 shell.invalidate_layout();
                 shell.request_redraw();
             }
+            // Alt / F10 activates the bar so it can be navigated without a mouse.
+            Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
+                if !global_state.open =>
+            {
+                use keyboard::key::Named;
+                match key {
+                    keyboard::Key::Named(Named::Alt | Named::F10) => {
+                        if global_state.bar_focused {
+                            global_state.bar_focused = false;
+                            global_state.keyboard_nav = false;
+                            bar_menu_state.keyboard_highlight = None;
+                        } else {
+                            global_state.bar_focused = true;
+                            global_state.keyboard_nav = true;
+                            bar_menu_state.keyboard_highlight =
+                                self.roots.iter().position(|r| r.navigable);
+                        }
+                        shell.capture_event();
+                        shell.request_redraw();
+                    }
+                    keyboard::Key::Named(Named::Escape) if global_state.bar_focused => {
+                        global_state.bar_focused = false;
+                        global_state.keyboard_nav = false;
+                        bar_menu_state.keyboard_highlight = None;
+                        shell.capture_event();
+                        shell.request_redraw();
+                    }
+                    keyboard::Key::Named(Named::ArrowLeft) if global_state.bar_focused => {
+                        let current = bar_menu_state.keyboard_highlight.unwrap_or(0);
+                        bar_menu_state.keyboard_highlight =
+                            prev_navigable_root(&self.roots, current);
+                        shell.capture_event();
+                        shell.request_redraw();
+                    }
+                    keyboard::Key::Named(Named::ArrowRight) if global_state.bar_focused => {
+                        let n = self.roots.len();
+                        let current = bar_menu_state.keyboard_highlight.unwrap_or(n - 1);
+                        bar_menu_state.keyboard_highlight =
+                            next_navigable_root(&self.roots, current);
+                        shell.capture_event();
+                        shell.request_redraw();
+                    }
+                    keyboard::Key::Named(
+                        Named::ArrowDown | Named::Enter | Named::Space,
+                    ) if global_state.bar_focused => {
+                        if let Some(idx) = bar_menu_state.keyboard_highlight {
+                            let item = &self.roots[idx];
+                            if item.menu.is_some() {
+                                global_state.open = true;
+                                global_state.keyboard_nav = true;
+                                global_state.bar_focused = false;
+                                bar_menu_state.open_new_menu(idx, item, &mut item_trees[idx]);
+                                shell.invalidate_layout();
+                                shell.request_redraw();
+                            }
+                        }
+                        shell.capture_event();
+                    }
+                    _ => {}
+                }
+            }
+            // Mouse movement while bar_focused exits bar-focus mode so the user can switch back
+            // to pointer-driven navigation without pressing Escape first.
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if global_state.bar_focused => {
+                global_state.bar_focused = false;
+                global_state.keyboard_nav = false;
+                bar_menu_state.keyboard_highlight = None;
+                shell.request_redraw();
+            }
             _ => {}
         }
     }
@@ -547,6 +675,11 @@ where
         operation: &mut dyn Operation<()>,
     ) {
         let slice_layout = layout.children().next().unwrap();
+
+        let bar_state = tree.state.downcast_mut::<MenuBarState>();
+
+        // Let custom operations (open_root / close_menu) find and modify our state by id.
+        operation.custom(self.id.as_ref(), layout.bounds(), bar_state);
 
         let MenuBarState {
             menu_state: bar_menu_state,
@@ -600,6 +733,7 @@ where
         let MenuBarState {
             global_state,
             menu_state: bar_menu_state,
+            ..
         } = tree.state.downcast_ref::<MenuBarState>();
 
         let slice = bar_menu_state.slice;
@@ -616,7 +750,7 @@ where
             Status::Active
         };
 
-        let styling = theme.style(&self.global_parameters.class, status);
+        let styling = <Theme as Catalog>::style(theme, &self.global_parameters.class, status);
         renderer.fill_quad(
             renderer::Quad {
                 bounds: layout.bounds(),
@@ -628,8 +762,8 @@ where
         );
 
         if matches!(&self.global_parameters.path_highlight, PathHighlight::Fill) {
-            // When open, highlight the active (open) root. Otherwise highlight whichever root
-            // the cursor is over so there's a visible hover response even before clicking.
+            // When open, highlight the active (open) root. When bar_focused (Alt mode), highlight
+            // the keyboard-focused root. Otherwise highlight whichever root the cursor is over.
             let highlight_bounds = if global_state.open {
                 bar_menu_state.active.and_then(|active| {
                     let active_in_slice = active - slice.start_index;
@@ -637,6 +771,11 @@ where
                         .children()
                         .nth(active_in_slice)
                         .map(|l| l.bounds())
+                })
+            } else if global_state.bar_focused {
+                bar_menu_state.keyboard_highlight.and_then(|highlighted| {
+                    let in_slice = highlighted.saturating_sub(slice.start_index);
+                    slice_layout.children().nth(in_slice).map(|l| l.bounds())
                 })
             } else {
                 slice_layout
@@ -681,9 +820,9 @@ where
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        let bar = tree.state.downcast_mut::<MenuBarState>();
+        let is_open = tree.state.downcast_ref::<MenuBarState>().global_state.open;
 
-        if bar.global_state.open {
+        if is_open {
             Some(
                 MenuBarOverlay {
                     menu_bar: self,
@@ -729,6 +868,118 @@ where
         }
     }
 }
+
+/// A unique identifier for a [`MenuBar`], used with [`open_root`] and [`close_menu`].
+///
+/// ```ignore
+/// let id = MenuBarId::unique();
+/// let bar = MenuBar::new(roots).id(id.clone());
+/// // In your update:
+/// Task::batch([iced_menu_bar::open_root(id, 0)])
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MenuBarId(WidgetId);
+
+impl MenuBarId {
+    /// Creates a named [`MenuBarId`].
+    pub fn new(s: &'static str) -> Self {
+        Self(WidgetId::new(s))
+    }
+
+    /// Creates a unique [`MenuBarId`].
+    pub fn unique() -> Self {
+        Self(WidgetId::unique())
+    }
+}
+
+/// Opens the root at `index` in the [`MenuBar`] with the given `id`.
+///
+/// Returns a [`Task`](iced::Task) that can be returned from your `update` function.
+/// The menu opens on the next event cycle.
+pub fn open_root<Message>(id: MenuBarId, index: usize) -> iced::Task<Message>
+where
+    Message: Send + 'static,
+{
+    use std::any::Any;
+
+    struct OpenRoot {
+        target: WidgetId,
+        index: usize,
+    }
+    impl<T> Operation<T> for OpenRoot {
+        fn custom(&mut self, id: Option<&WidgetId>, _bounds: Rectangle, state: &mut dyn Any) {
+            if id == Some(&self.target) {
+                if let Some(bar) = state.downcast_mut::<MenuBarState>() {
+                    bar.global_state.pending_open = Some(self.index);
+                }
+            }
+        }
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {
+            operate(self);
+        }
+    }
+
+    iced::advanced::widget::operate(OpenRoot { target: id.0, index })
+}
+
+/// Closes the open menu tree in the [`MenuBar`] with the given `id`, if any.
+///
+/// Returns a [`Task`](iced::Task) that can be returned from your `update` function.
+pub fn close_menu<Message>(id: MenuBarId) -> iced::Task<Message>
+where
+    Message: Send + 'static,
+{
+    use std::any::Any;
+
+    struct CloseMenu {
+        target: WidgetId,
+    }
+    impl<T> Operation<T> for CloseMenu {
+        fn custom(&mut self, id: Option<&WidgetId>, _bounds: Rectangle, state: &mut dyn Any) {
+            if id == Some(&self.target) {
+                if let Some(bar) = state.downcast_mut::<MenuBarState>() {
+                    bar.global_state.pending_close = true;
+                }
+            }
+        }
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {
+            operate(self);
+        }
+    }
+
+    iced::advanced::widget::operate(CloseMenu { target: id.0 })
+}
+
+/// Finds the previous navigable root index, wrapping around.
+fn prev_navigable_root<'a, Message, Theme: Catalog, Renderer: renderer::Renderer>(
+    roots: &[Item<'a, Message, Theme, Renderer>],
+    current: usize,
+) -> Option<usize> {
+    let n = roots.len();
+    for delta in 1..=n {
+        let idx = (current + n - delta) % n;
+        if roots[idx].navigable {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+/// Finds the next navigable root index, wrapping around.
+fn next_navigable_root<'a, Message, Theme: Catalog, Renderer: renderer::Renderer>(
+    roots: &[Item<'a, Message, Theme, Renderer>],
+    current: usize,
+) -> Option<usize> {
+    let n = roots.len();
+    for delta in 1..=n {
+        let idx = (current + delta) % n;
+        if roots[idx].navigable {
+            return Some(idx);
+        }
+    }
+    None
+}
+
 impl<'a, Message, Theme, Renderer> From<MenuBar<'a, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
