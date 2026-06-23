@@ -1228,7 +1228,11 @@ where
             }
         }
 
-        let theme_style = <Theme as Catalog>::style(theme, &self.menu_bar.global_parameters.class, Status::Selected);
+        let theme_style = <Theme as Catalog>::style(
+            theme,
+            &self.menu_bar.global_parameters.class,
+            Status::Selected,
+        );
 
         rec(
             &self.menu_bar.global_parameters,

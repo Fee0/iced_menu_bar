@@ -1047,14 +1047,14 @@ where
 {
     use iced::widget::{container, text};
 
-    let content = container(
-        text(label.into_fragment()).style(|theme: &iced::Theme| iced::widget::text::Style {
+    let content = container(text(label.into_fragment()).style(|theme: &iced::Theme| {
+        iced::widget::text::Style {
             color: Some(iced::Color {
                 a: 0.55,
                 ..theme.extended_palette().background.base.text
             }),
-        }),
-    )
+        }
+    }))
     .width(Length::Fill)
     .padding([4.0, 12.0]);
 

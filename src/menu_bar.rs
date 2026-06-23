@@ -8,8 +8,8 @@ use iced::advanced::layout::{Limits, Node};
 use iced::advanced::widget::{Id as WidgetId, Operation, Tree, tree};
 use iced::advanced::{Clipboard, Layout, Shell, Widget, overlay, renderer};
 use iced::{
-    Alignment, Element, Event, Length, Padding, Pixels, Rectangle, Size,
-    Vector, keyboard, mouse, window,
+    Alignment, Element, Event, Length, Padding, Pixels, Rectangle, Size, Vector, keyboard, mouse,
+    window,
 };
 
 use crate::common::*;
@@ -429,6 +429,8 @@ where
         let slice = bar_menu_state.slice;
         let bar_is_open = global_state.open;
         let bar_active = bar_menu_state.active;
+        let bar_focused = global_state.bar_focused;
+        let keyboard_highlight = bar_menu_state.keyboard_highlight;
         itl_iter_slice_enum!(
             slice,
             self.roots;iter_mut,
@@ -436,14 +438,15 @@ where
             slice_layout.children()
         )
         .for_each(|(i, ((item, tree), layout))| {
-            let item_cursor = if matches!(&self.global_parameters.path_highlight, PathHighlight::Fill)
-                && bar_is_open
-                && bar_active == Some(i)
-            {
-                mouse::Cursor::Available(layout.bounds().center())
-            } else {
-                cursor
-            };
+            let item_cursor =
+                if matches!(&self.global_parameters.path_highlight, PathHighlight::Fill)
+                    && ((bar_is_open && bar_active == Some(i))
+                        || (bar_focused && keyboard_highlight == Some(i)))
+                {
+                    mouse::Cursor::Available(layout.bounds().center())
+                } else {
+                    cursor
+                };
             item.update(
                 tree,
                 event,
@@ -595,9 +598,7 @@ where
                 shell.request_redraw();
             }
             // Alt / F10 activates the bar so it can be navigated without a mouse.
-            Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
-                if !global_state.open =>
-            {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) if !global_state.open => {
                 use keyboard::key::Named;
                 match key {
                     keyboard::Key::Named(Named::Alt | Named::F10) => {
@@ -636,9 +637,9 @@ where
                         shell.capture_event();
                         shell.request_redraw();
                     }
-                    keyboard::Key::Named(
-                        Named::ArrowDown | Named::Enter | Named::Space,
-                    ) if global_state.bar_focused => {
+                    keyboard::Key::Named(Named::ArrowDown | Named::Enter | Named::Space)
+                        if global_state.bar_focused =>
+                    {
                         if let Some(idx) = bar_menu_state.keyboard_highlight {
                             let item = &self.roots[idx];
                             if item.menu.is_some() {
@@ -796,6 +797,10 @@ where
             }
         }
 
+        let draw_bar_is_open = global_state.open;
+        let draw_bar_focused = global_state.bar_focused;
+        let draw_bar_active = bar_menu_state.active;
+        let draw_keyboard_highlight = bar_menu_state.keyboard_highlight;
         renderer.with_layer(
             Rectangle {
                 x: layout.bounds().x + self.padding.left,
@@ -804,9 +809,16 @@ where
                 height: layout.bounds().height - self.padding.y(),
             },
             |r| {
-                itl_iter_slice!(slice, self.roots;iter, tree.children;iter, slice_layout.children())
-                .for_each(|((item, tree), layout)| {
-                    item.draw(tree, r, theme, style, layout, cursor, viewport);
+                itl_iter_slice_enum!(slice, self.roots;iter, tree.children;iter, slice_layout.children())
+                .for_each(|(i, ((item, child_tree), layout))| {
+                    let item_cursor = if (draw_bar_focused && draw_keyboard_highlight == Some(i))
+                        || (draw_bar_is_open && draw_bar_active == Some(i))
+                    {
+                        mouse::Cursor::Available(layout.bounds().center())
+                    } else {
+                        cursor
+                    };
+                    item.draw(child_tree, r, theme, style, layout, item_cursor, viewport);
                 });
             },
         );
@@ -908,10 +920,10 @@ where
     }
     impl<T> Operation<T> for OpenRoot {
         fn custom(&mut self, id: Option<&WidgetId>, _bounds: Rectangle, state: &mut dyn Any) {
-            if id == Some(&self.target) {
-                if let Some(bar) = state.downcast_mut::<MenuBarState>() {
-                    bar.global_state.pending_open = Some(self.index);
-                }
+            if id == Some(&self.target)
+                && let Some(bar) = state.downcast_mut::<MenuBarState>()
+            {
+                bar.global_state.pending_open = Some(self.index);
             }
         }
         fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {
@@ -919,7 +931,10 @@ where
         }
     }
 
-    iced::advanced::widget::operate(OpenRoot { target: id.0, index })
+    iced::advanced::widget::operate(OpenRoot {
+        target: id.0,
+        index,
+    })
 }
 
 /// Closes the open menu tree in the [`MenuBar`] with the given `id`, if any.
@@ -936,10 +951,10 @@ where
     }
     impl<T> Operation<T> for CloseMenu {
         fn custom(&mut self, id: Option<&WidgetId>, _bounds: Rectangle, state: &mut dyn Any) {
-            if id == Some(&self.target) {
-                if let Some(bar) = state.downcast_mut::<MenuBarState>() {
-                    bar.global_state.pending_close = true;
-                }
+            if id == Some(&self.target)
+                && let Some(bar) = state.downcast_mut::<MenuBarState>()
+            {
+                bar.global_state.pending_close = true;
             }
         }
         fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<T>)) {

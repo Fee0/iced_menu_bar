@@ -11,9 +11,7 @@
 use iced::widget::{column, container, svg, text};
 use iced::{Element, Fill, Task, Theme};
 
-use iced_menu_bar::{
-    Item, Menu, MenuBar, Status, Style, default_style, group_header, separator,
-};
+use iced_menu_bar::{Item, Menu, MenuBar, Status, Style, default_style, group_header, separator};
 
 /// The widget types default to iced's built-in `Theme`/`Renderer`, so the common case only needs
 /// the lifetime and `Message`.
@@ -157,17 +155,25 @@ fn edit_menu() -> MenuItem {
         "Edit",
         Menu::new(vec![
             group_header("Clipboard"),
-            Item::action("Cut", Message::Selected("Cut")).hotkey("⌘X").build(),
+            Item::action("Cut", Message::Selected("Cut"))
+                .hotkey("⌘X")
+                .build(),
             // keep_open: the menu stays open after clicking "Copy".
             Item::action("Copy", Message::Selected("Copy"))
                 .hotkey("⌘C")
                 .build()
                 .keep_open(),
-            Item::action("Paste", Message::Selected("Paste")).hotkey("⌘V").build(),
+            Item::action("Paste", Message::Selected("Paste"))
+                .hotkey("⌘V")
+                .build(),
             separator(),
             group_header("History"),
-            Item::action("Undo", Message::Selected("Undo")).hotkey("⌘Z").build(),
-            Item::action("Redo", Message::Selected("Redo")).hotkey("⌘⇧Z").build(),
+            Item::action("Undo", Message::Selected("Undo"))
+                .hotkey("⌘Z")
+                .build(),
+            Item::action("Redo", Message::Selected("Redo"))
+                .hotkey("⌘⇧Z")
+                .build(),
         ]),
     )
     .build()
@@ -204,8 +210,12 @@ fn format_menu() -> MenuItem {
     Item::root(
         "Format",
         Menu::new(vec![
-            Item::action("Bold", Message::Selected("Bold")).hotkey("⌘B").build(),
-            Item::action("Italic", Message::Selected("Italic")).hotkey("⌘I").build(),
+            Item::action("Bold", Message::Selected("Bold"))
+                .hotkey("⌘B")
+                .build(),
+            Item::action("Italic", Message::Selected("Italic"))
+                .hotkey("⌘I")
+                .build(),
             Item::action("Underline", Message::Selected("Underline"))
                 .hotkey("⌘U")
                 .build(),
