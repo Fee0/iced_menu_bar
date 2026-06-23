@@ -468,22 +468,17 @@ where
                 }
                 Op::RedrawUpdate => {
                     let cursor = if let Some(active) = menu_state.active {
-                        match &global_parameters.path_highlight {
-                            PathHighlight::Hover => {
-                                let active_in_slice = active - menu_state.slice.start_index;
-                                let center = slice_layout
-                                    .children()
-                                    .nth(active_in_slice)
-                                    .expect(
-                                        "Index (in slice space) is not within the slice layout. \
-                                        This should not happen, please report this issue",
-                                    )
-                                    .bounds()
-                                    .center();
-                                mouse::Cursor::Available(center)
-                            }
-                            PathHighlight::Fill => mouse::Cursor::Unavailable,
-                        }
+                        let active_in_slice = active - menu_state.slice.start_index;
+                        let center = slice_layout
+                            .children()
+                            .nth(active_in_slice)
+                            .expect(
+                                "Index (in slice space) is not within the slice layout. \
+                                This should not happen, please report this issue",
+                            )
+                            .bounds()
+                            .center();
+                        mouse::Cursor::Available(center)
                     } else {
                         cursor
                     };
@@ -1216,7 +1211,10 @@ where
         use iced::widget::{button, text};
 
         Self::with_menu(
-            button(text(label)).padding(padding).style(style).on_press_maybe(None),
+            button(text(label))
+                .padding(padding)
+                .style(style)
+                .on_press_maybe(None),
             menu,
         )
     }
@@ -1334,8 +1332,7 @@ where
     /// Swaps in a custom [`button`] style, replacing the crate's default [`menu_item_style`].
     pub fn style(
         mut self,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style + 'a,
     ) -> Self {
         self.style = Some(Box::new(style));
         self
@@ -1374,7 +1371,8 @@ where
     }
 }
 
-impl<'a, Message> From<ActionBuilder<'a, Message>> for Item<'a, Message, iced::Theme, iced::Renderer>
+impl<'a, Message> From<ActionBuilder<'a, Message>>
+    for Item<'a, Message, iced::Theme, iced::Renderer>
 where
     Message: Clone + 'a,
 {
@@ -1456,8 +1454,7 @@ where
     /// Swaps in a custom [`button`] style, replacing the crate's default [`menu_item_style`].
     pub fn style(
         mut self,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style + 'a,
     ) -> Self {
         self.style = Some(Box::new(style));
         self
@@ -1520,8 +1517,7 @@ where
     /// Swaps in a custom [`button`] style, replacing the crate's default [`menu_item_style`].
     pub fn style(
         mut self,
-        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style
-        + 'a,
+        style: impl Fn(&iced::Theme, iced::widget::button::Status) -> iced::widget::button::Style + 'a,
     ) -> Self {
         self.style = Some(Box::new(style));
         self
@@ -1638,8 +1634,9 @@ fn submenu_chevron<'a, Message: 'a>(
 ) -> Element<'a, Message, iced::Theme, iced::Renderer> {
     use iced::widget::svg;
 
-    let handle =
-        svg::Handle::from_memory(include_bytes!("../svg/arrow-next-small-svgrepo-com.svg").as_slice());
+    let handle = svg::Handle::from_memory(
+        include_bytes!("../svg/arrow-next-small-svgrepo-com.svg").as_slice(),
+    );
 
     svg(handle)
         .width(size)

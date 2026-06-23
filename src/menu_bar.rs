@@ -228,7 +228,7 @@ where
     }
 
     /// Sets the style of the [`MenuBar`].
-    pub fn style(mut self, style: impl Fn(&Theme) -> Style + 'a) -> Self
+    pub fn style(mut self, style: impl Fn(&Theme, Status) -> Style + 'a) -> Self
     where
         Theme::Class<'a>: From<StyleFn<'a, Theme, Style>>,
     {
@@ -406,15 +406,32 @@ where
         } = bar;
 
         let slice = bar_menu_state.slice;
-        itl_iter_slice!(
+        let bar_is_open = global_state.open;
+        let bar_active = bar_menu_state.active;
+        itl_iter_slice_enum!(
             slice,
             self.roots;iter_mut,
             item_trees;iter_mut,
             slice_layout.children()
         )
-        .for_each(|((item, tree), layout)| {
+        .for_each(|(i, ((item, tree), layout))| {
+            let item_cursor = if matches!(&self.global_parameters.path_highlight, PathHighlight::Fill)
+                && bar_is_open
+                && bar_active == Some(i)
+            {
+                mouse::Cursor::Available(layout.bounds().center())
+            } else {
+                cursor
+            };
             item.update(
-                tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+                tree,
+                event,
+                layout,
+                item_cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
             );
         });
 
@@ -587,7 +604,19 @@ where
 
         let slice = bar_menu_state.slice;
 
-        let styling = theme.style(&self.global_parameters.class);
+        let status = if global_state.keyboard_nav {
+            Status::Focused
+        } else if global_state.open {
+            Status::Selected
+        } else if global_state.pressed {
+            Status::Pressed
+        } else if cursor.is_over(layout.bounds()) {
+            Status::Hovered
+        } else {
+            Status::Active
+        };
+
+        let styling = theme.style(&self.global_parameters.class, status);
         renderer.fill_quad(
             renderer::Quad {
                 bounds: layout.bounds(),
@@ -604,7 +633,10 @@ where
             let highlight_bounds = if global_state.open {
                 bar_menu_state.active.and_then(|active| {
                     let active_in_slice = active - slice.start_index;
-                    slice_layout.children().nth(active_in_slice).map(|l| l.bounds())
+                    slice_layout
+                        .children()
+                        .nth(active_in_slice)
+                        .map(|l| l.bounds())
                 })
             } else {
                 slice_layout

@@ -156,7 +156,8 @@ where
                     };
                     if self.menu_bar.roots[new].menu.is_some() {
                         let item = &self.menu_bar.roots[new];
-                        bar.menu_state.open_new_menu(new, item, &mut item_trees[new]);
+                        bar.menu_state
+                            .open_new_menu(new, item, &mut item_trees[new]);
                         if let Some(mt) = item_trees[new].children.get_mut(1) {
                             let first = self.menu_bar.roots[new]
                                 .menu
@@ -780,13 +781,9 @@ where
                     tree,
                     ..
                 } = self;
-                let path_highlight = menu_bar.global_parameters.path_highlight;
-                let cursor = match path_highlight {
-                    PathHighlight::Hover => {
-                        let center = parent_bounds.center();
-                        mouse::Cursor::Available(center - self.translation)
-                    }
-                    PathHighlight::Fill => mouse::Cursor::Unavailable,
+                let cursor = {
+                    let center = parent_bounds.center();
+                    mouse::Cursor::Available(center - self.translation)
                 };
 
                 let slice_layout = layout.children().next().unwrap();
@@ -1225,7 +1222,7 @@ where
             }
         }
 
-        let theme_style = theme.style(&self.menu_bar.global_parameters.class);
+        let theme_style = theme.style(&self.menu_bar.global_parameters.class, Status::Selected);
 
         rec(
             &self.menu_bar.global_parameters,

@@ -13,7 +13,7 @@
 use iced::widget::{column, container, svg, text};
 use iced::{Element, Fill, Task, Theme};
 
-use iced_menu_bar::{Item, Menu, MenuBar, separator};
+use iced_menu_bar::{Item, Menu, MenuBar, Status, Style, default_style, separator};
 
 /// The widget types default to iced's built-in `Theme`/`Renderer`, so the common case only needs
 /// the lifetime and `Message`.
@@ -82,9 +82,13 @@ fn menu_bar() -> Element<'static, Message> {
                 .hotkey("⌘O")
                 .build(),
             // A hotkey with no icon — still right-aligned, label still lines up via the icon column.
-            Item::action("Save", Message::Selected("Save")).hotkey("⌘S").build(),
+            Item::action("Save", Message::Selected("Save"))
+                .hotkey("⌘S")
+                .build(),
             // A disabled action: greyed out, ignores clicks, keeps the menu open.
-            Item::action("Save As…", Message::Selected("Save As")).disabled().build(),
+            Item::action("Save As…", Message::Selected("Save As"))
+                .disabled()
+                .build(),
             separator(),
             Item::submenu(
                 "Open Recent",
@@ -114,6 +118,18 @@ fn menu_bar() -> Element<'static, Message> {
     MenuBar::new(vec![file, edit, help])
         .width(Fill)
         .open_on_hover(true)
+        .style(|theme, status| {
+            // Hovered and Selected use the same path highlight so hovering a root and
+            // opening its menu look identical.
+            let base = default_style(theme, status);
+            match status {
+                Status::Hovered | Status::Selected => Style {
+                    path: theme.extended_palette().primary.base.color.into(),
+                    ..base
+                },
+                _ => base,
+            }
+        })
         .into()
 }
 

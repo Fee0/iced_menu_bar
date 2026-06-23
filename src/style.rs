@@ -6,12 +6,28 @@
 use iced::widget::button;
 use iced::{Background, Border, Color, Shadow, Theme, Vector};
 
-/// A boxed style function: maps a `Theme` to a [`Style`].
+/// The interaction state of a [`MenuBar`](crate::MenuBar) passed to the style function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// No interaction.
+    Active,
+    /// Cursor is over the bar but no menu is open.
+    Hovered,
+    /// Mouse button is held down.
+    Pressed,
+    /// Keyboard navigation is active.
+    Focused,
+    /// A menu tree is open.
+    Selected,
+    /// The bar is disabled.
+    Disabled,
+}
+
+/// A boxed style function: maps a `Theme` and [`Status`] to a [`Style`].
 ///
-/// The bar and its menus are *chrome* with a single visual state, so the function takes only the
-/// theme. Per-entry interactive states (hover/press) are handled separately by the entries' own
+/// Per-entry interactive states (hover/press) are handled separately by the entries' own
 /// button styles (see [`menu_item_style`]).
-pub type StyleFn<'a, Theme, Style> = Box<dyn Fn(&Theme) -> Style + 'a>;
+pub type StyleFn<'a, Theme, Style> = Box<dyn Fn(&Theme, Status) -> Style + 'a>;
 
 /// The appearance of a menu bar and its menus.
 #[derive(Debug, Clone, Copy)]
@@ -79,8 +95,8 @@ pub trait Catalog {
     /// The default class produced by the [`Catalog`].
     fn default<'a>() -> Self::Class<'a>;
 
-    /// Resolves the [`Style`] of a class.
-    fn style(&self, class: &Self::Class<'_>) -> Style;
+    /// Resolves the [`Style`] of a class for the given interaction [`Status`].
+    fn style(&self, class: &Self::Class<'_>, status: Status) -> Style;
 }
 
 impl Catalog for Theme {
@@ -90,8 +106,8 @@ impl Catalog for Theme {
         Box::new(default_style)
     }
 
-    fn style(&self, class: &Self::Class<'_>) -> Style {
-        class(self)
+    fn style(&self, class: &Self::Class<'_>, status: Status) -> Style {
+        class(self, status)
     }
 }
 
@@ -99,11 +115,14 @@ impl Catalog for Theme {
 ///
 /// A transparent bar over a slightly elevated flyout with a subtle hairline border and a
 /// soft drop shadow — derived from the theme palette so it adapts to light and dark themes.
+///
+/// The path highlight varies by [`Status`]: `Hovered` uses the weak primary colour,
+/// `Selected`/`Focused` the base, and `Pressed` the strong colour.
 #[must_use]
-pub fn default_style(theme: &Theme) -> Style {
+pub fn default_style(theme: &Theme, status: Status) -> Style {
     let palette = theme.extended_palette();
 
-    Style {
+    let base = Style {
         bar_background: Background::Color(Color::TRANSPARENT),
         bar_border: Border::default(),
         bar_shadow: Shadow::default(),
@@ -121,6 +140,19 @@ pub fn default_style(theme: &Theme) -> Style {
         path: Background::Color(palette.primary.weak.color),
         path_border: Border::default(),
         separator: palette.background.strong.color,
+    };
+
+    match status {
+        Status::Active | Status::Disabled => base,
+        Status::Hovered => base,
+        Status::Pressed => Style {
+            path: Background::Color(palette.primary.strong.color),
+            ..base
+        },
+        Status::Focused | Status::Selected => Style {
+            path: Background::Color(palette.primary.base.color),
+            ..base
+        },
     }
 }
 
