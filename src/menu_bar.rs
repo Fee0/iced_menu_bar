@@ -35,6 +35,9 @@ pub(crate) struct GlobalState {
     /// `true` while Alt/F10 has activated the bar but no submenu is open yet. Arrow Left/Right
     /// moves the focus across roots; Arrow Down / Enter / Space opens the focused root.
     pub(crate) bar_focused: bool,
+    /// `true` while Alt is held down and has not yet been turned into a chord. Only a lone Alt
+    /// tap activates the bar; any other key or mouse button pressed in between disarms it.
+    pub(crate) alt_armed: bool,
     /// Set by a widget operation ([`open_root`]) and consumed in `update()`.
     pub(crate) pending_open: Option<usize>,
     /// Set by a widget operation ([`close_menu`]) and consumed in `update()`.
@@ -461,6 +464,23 @@ where
 
         let bar_bounds = layout.bounds();
 
+        // Arm/disarm the lone-Alt-tap gesture. Alt arms only when pressed by itself; anything
+        // pressed while it is held (Alt+F4, Alt+Left, Alt+click, ...) makes it a chord, and
+        // losing window focus covers Alt+Tab, where the release never reaches us.
+        match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                global_state.alt_armed =
+                    matches!(key, keyboard::Key::Named(keyboard::key::Named::Alt))
+                        && !global_state.open
+                        && !(modifiers.control() || modifiers.shift() || modifiers.logo());
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::WheelScrolled { .. })
+            | Event::Window(window::Event::Unfocused) => {
+                global_state.alt_armed = false;
+            }
+            _ => {}
+        }
+
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
                 if cursor.is_over(bar_bounds) =>
@@ -597,23 +617,21 @@ where
                 shell.invalidate_layout();
                 shell.request_redraw();
             }
-            // Alt / F10 activates the bar so it can be navigated without a mouse.
+            // A lone Alt tap toggles the bar on *release*, not on press, so that Alt-chords keep
+            // reaching the rest of the app.
+            Event::Keyboard(keyboard::Event::KeyReleased {
+                key: keyboard::Key::Named(keyboard::key::Named::Alt),
+                ..
+            }) if global_state.alt_armed => {
+                global_state.alt_armed = false;
+                toggle_bar_focus(&self.roots, global_state, bar_menu_state, shell);
+            }
+            // F10 activates the bar so it can be navigated without a mouse.
             Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) if !global_state.open => {
                 use keyboard::key::Named;
                 match key {
-                    keyboard::Key::Named(Named::Alt | Named::F10) => {
-                        if global_state.bar_focused {
-                            global_state.bar_focused = false;
-                            global_state.keyboard_nav = false;
-                            bar_menu_state.keyboard_highlight = None;
-                        } else {
-                            global_state.bar_focused = true;
-                            global_state.keyboard_nav = true;
-                            bar_menu_state.keyboard_highlight =
-                                self.roots.iter().position(|r| r.navigable);
-                        }
-                        shell.capture_event();
-                        shell.request_redraw();
+                    keyboard::Key::Named(Named::F10) => {
+                        toggle_bar_focus(&self.roots, global_state, bar_menu_state, shell);
                     }
                     keyboard::Key::Named(Named::Escape) if global_state.bar_focused => {
                         global_state.bar_focused = false;
@@ -966,6 +984,26 @@ where
 }
 
 /// Finds the previous navigable root index, wrapping around.
+/// Toggles keyboard focus of the bar, highlighting the first navigable root when entering.
+fn toggle_bar_focus<'a, Message, Theme: Catalog, Renderer: renderer::Renderer>(
+    roots: &[Item<'a, Message, Theme, Renderer>],
+    global_state: &mut GlobalState,
+    menu_state: &mut MenuState,
+    shell: &mut Shell<'_, Message>,
+) {
+    if global_state.bar_focused {
+        global_state.bar_focused = false;
+        global_state.keyboard_nav = false;
+        menu_state.keyboard_highlight = None;
+    } else {
+        global_state.bar_focused = true;
+        global_state.keyboard_nav = true;
+        menu_state.keyboard_highlight = roots.iter().position(|r| r.navigable);
+    }
+    shell.capture_event();
+    shell.request_redraw();
+}
+
 fn prev_navigable_root<'a, Message, Theme: Catalog, Renderer: renderer::Renderer>(
     roots: &[Item<'a, Message, Theme, Renderer>],
     current: usize,
